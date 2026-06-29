@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check imports
+        env:
+          GROQ_API_KEY: dummy
+        run: python -c "from app.main import app; print('OK')"
+
+      - name: Run tests
+        env:
+          GROQ_API_KEY: dummy
+        run: |
+          if [ -d tests ]; then
+            python -m pytest tests/ -v --tb=short
+          else
+            echo "No tests directory yet — skipping"
+          fi
