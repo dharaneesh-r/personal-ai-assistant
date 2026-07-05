@@ -5,9 +5,15 @@ from pydantic import BaseModel
 
 # --- Chat ---
 
+class ChatHistoryTurn(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     prompt: str
     model: str = "llama-3.1-8b-instant"
+    history: Optional[List[ChatHistoryTurn]] = None
 
 
 class ChatResponse(BaseModel):
@@ -74,6 +80,7 @@ class RagQueryRequest(BaseModel):
     use_hybrid: bool = False
     use_rerank: bool = False
     rewrite_query: bool = False
+    use_graph: bool = False
     history: Optional[List[HistoryTurn]] = None
 
 

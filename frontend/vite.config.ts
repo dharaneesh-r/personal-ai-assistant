@@ -6,11 +6,15 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/chat':   'http://localhost:8000',
-      '/rag':    'http://localhost:8000',
-      '/agent':  'http://localhost:8000',
-      '/ingest': 'http://localhost:8000',
-      '/eval':   'http://localhost:8000',
+      '/chat':   'http://127.0.0.1:8000',
+      '/rag':    'http://127.0.0.1:8000',
+      '/agent':  'http://127.0.0.1:8000',
+      '/ingest': 'http://127.0.0.1:8000',
+      '/eval':   'http://127.0.0.1:8000',
     },
+  },
+  build: {
+    outDir: '../app/static',
+    emptyOutDir: true,
   },
 })

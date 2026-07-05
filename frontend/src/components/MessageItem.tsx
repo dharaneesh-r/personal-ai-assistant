@@ -1,7 +1,79 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { Copy, Check, ChevronRight } from 'lucide-react'
 import type { Message } from '../types'
+import mermaid from 'mermaid'
+
+// Initialize Mermaid with theme variables matching the theme
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'dark',
+  securityLevel: 'loose',
+  themeVariables: {
+    background: '#18181b',
+    primaryColor: '#7c3aed',
+    primaryTextColor: '#ececec',
+    lineColor: '#52525b',
+  }
+})
+
+function MermaidRenderer({ code }: { code: string }) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [svg, setSvg] = useState<string>('')
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    const renderChart = async () => {
+      try {
+        const id = 'mermaid-' + Math.random().toString(36).slice(2, 9)
+        // Clean up previous runs
+        if (containerRef.current) {
+          containerRef.current.innerHTML = ''
+        }
+        // Render SVG dynamically
+        const { svg: renderedSvg } = await mermaid.render(id, code)
+        if (active) {
+          setSvg(renderedSvg)
+          setError(null)
+        }
+      } catch (err: any) {
+        console.error("Mermaid Render Error:", err)
+        // Extract syntax errors if available
+        if (active) {
+          setError(err.message || 'Failed to parse Mermaid diagram')
+        }
+      }
+    }
+
+    renderChart()
+    return () => {
+      active = false
+    }
+  }, [code])
+
+  if (error) {
+    return (
+      <div className="bg-red-950/20 border border-red-900/30 rounded-xl p-3.5 my-2 text-xs text-red-400 font-mono overflow-x-auto">
+        <div className="font-semibold mb-1 flex items-center gap-1.5">⚠️ Mermaid Render Error</div>
+        <pre className="text-[10px] text-red-300 whitespace-pre-wrap">{code}</pre>
+      </div>
+    )
+  }
+
+  return (
+    <div className="bg-gray-900/60 p-4 border border-gray-700 rounded-xl my-2 flex justify-center overflow-x-auto shadow-inner">
+      <div ref={containerRef} className="hidden" />
+      {svg ? (
+        <div className="w-full flex justify-center" dangerouslySetInnerHTML={{ __html: svg }} />
+      ) : (
+        <div className="text-xs text-gray-500 animate-pulse py-2">Rendering diagram...</div>
+      )}
+    </div>
+  )
+}
+
 
 interface Props { msg: Message }
 
@@ -64,7 +136,22 @@ export default function MessageItem({ msg }: Props) {
             </div>
           ) : (
             <div className="prose-ai text-sm text-gray-100">
-              <ReactMarkdown>{msg.content}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  code({ node, className, children, ...props }) {
+                    const match = /language-(\w+)/.exec(className || '')
+                    const lang = match ? match[1] : ''
+                    const codeVal = String(children).replace(/\n$/, '')
+                    if (lang === 'mermaid') {
+                      return <MermaidRenderer code={codeVal} />
+                    }
+                    return <code className={className} {...props}>{children}</code>
+                  }
+                }}
+              >
+                {msg.content}
+              </ReactMarkdown>
               {msg.streaming && <span className="cursor-blink" />}
             </div>
           )}

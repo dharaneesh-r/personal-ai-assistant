@@ -72,3 +72,35 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 .slide-up { animation: slide-up 0.2s ease; }
+
+/* Table Styling inside prose-ai */
+.prose-ai table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+  background-color: #1a1a1a;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #3f3f3f;
+}
+.prose-ai th {
+  background-color: #2f2f2f;
+  color: #ececec;
+  text-align: left;
+  padding: 8px 12px;
+  font-weight: 600;
+  border-bottom: 2px solid #3f3f3f;
+}
+.prose-ai td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #2f2f2f;
+  color: #d1d1d1;
+}
+.prose-ai tr:last-child td {
+  border-bottom: none;
+}
+.prose-ai tr:hover {
+  background-color: #262626;
+}
+

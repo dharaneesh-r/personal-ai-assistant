@@ -16,12 +16,27 @@ def _get_client() -> Groq:
     return Groq(api_key=settings.groq_api_key)
 
 
+_SYSTEM_PROMPT = (
+    "You are a helpful AI assistant. Be extremely forgiving of spelling mistakes, typos, "
+    "and grammatical errors. Intelligently deduce the user's intent and answer directly "
+    "instead of asking for minor clarifications. If the user asks for a chart or table "
+    "(even with typos like 'piechart ot fhtat' or 'table ot thta'), output the requested "
+    "chart (in Mermaid format) or table based on the context of the conversation."
+)
+
+
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     client = _get_client()
     try:
+        messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+        if request.history:
+            for turn in request.history:
+                messages.append({"role": turn.role, "content": turn.content})
+        messages.append({"role": "user", "content": request.prompt})
+
         completion = client.chat.completions.create(
-            messages=[{"role": "user", "content": request.prompt}],
+            messages=messages,
             model=request.model,
         )
         return ChatResponse(
@@ -38,8 +53,14 @@ async def chat_stream(request: ChatRequest):
 
     def generate():
         try:
+            messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
+            if request.history:
+                for turn in request.history:
+                    messages.append({"role": turn.role, "content": turn.content})
+            messages.append({"role": "user", "content": request.prompt})
+
             stream = client.chat.completions.create(
-                messages=[{"role": "user", "content": request.prompt}],
+                messages=messages,
                 model=request.model,
                 stream=True,
             )

@@ -6,6 +6,8 @@ from app.api.models import ChunkPreview, IngestResponse, IngestTextRequest, Inge
 from app.ingestion.loader import load_file, load_url
 from app.ingestion.processor import process_document
 from app.rag.vectorstore import add_chunks
+from app.ingestion.graph_extractor import extract_graph_from_text
+from app.rag.graphstore import add_entities_and_relations
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
@@ -15,12 +17,19 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 SUPPORTED_EXTENSIONS = {".txt", ".pdf", ".docx"}
 
 
+def _extract_and_store_graph(text: str, source: str):
+    graph = extract_graph_from_text(text)
+    if graph["entities"] or graph["relations"]:
+        add_entities_and_relations(graph["entities"], graph["relations"], source)
+
+
 @router.post("/text", response_model=IngestResponse)
 async def ingest_text(request: IngestTextRequest):
     if not request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
     chunks = process_document(request.text, source=request.source_name, source_type="text")
     stored = add_chunks(chunks)
+    _extract_and_store_graph(request.text, request.source_name)
     return _build_response(request.source_name, "text", chunks, stored)
 
 
@@ -45,6 +54,7 @@ async def ingest_file(file: UploadFile = File(...)):
     source_type = suffix.lstrip(".")
     chunks = process_document(text, source=file.filename, source_type=source_type)
     stored = add_chunks(chunks)
+    _extract_and_store_graph(text, file.filename)
     return _build_response(file.filename, source_type, chunks, stored)
 
 
@@ -62,6 +72,7 @@ async def ingest_url(request: IngestUrlRequest):
 
     chunks = process_document(text, source=request.url, source_type="url")
     stored = add_chunks(chunks)
+    _extract_and_store_graph(text, request.url)
     return _build_response(request.url, "url", chunks, stored)
 
 

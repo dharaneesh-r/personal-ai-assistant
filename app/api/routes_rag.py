@@ -7,6 +7,7 @@ from app.api.models import DeleteResponse, RagQueryRequest, RagQueryResponse, So
 from app.rag.pipeline import rag_query
 from app.rag.retriever import retrieve
 from app.rag.vectorstore import delete_source, list_sources, _get_collection
+from app.rag.graphstore import delete_source_graph, clear_graph, get_all_graph
 
 router = APIRouter(prefix="/rag", tags=["rag"])
 
@@ -24,6 +25,7 @@ async def query_rag(request: RagQueryRequest):
             use_hybrid=request.use_hybrid,
             use_rerank=request.use_rerank,
             rewrite_query=request.rewrite_query,
+            use_graph=request.use_graph,
             history=history,
         )
         return RagQueryResponse(**result)
@@ -39,6 +41,7 @@ async def get_sources():
 @router.delete("/sources", response_model=DeleteResponse)
 async def remove_source(source: str = Query(..., description="Exact source name or URL to delete")):
     deleted = delete_source(source)
+    delete_source_graph(source)
     if deleted == 0:
         raise HTTPException(status_code=404, detail=f"Source '{source}' not found in vector store.")
     return DeleteResponse(source=source, chunks_deleted=deleted)
@@ -50,6 +53,7 @@ async def clear_all_sources():
     total = 0
     for s in sources:
         total += delete_source(s["source"])
+    clear_graph()
     return {"deleted_sources": len(sources), "deleted_chunks": total}
 
 
@@ -95,5 +99,22 @@ async def debug_retrieval(request: DebugRequest) -> Dict[str, Any]:
                 for i, c in enumerate(chunks)
             ],
         }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/graph")
+async def get_graph():
+    try:
+        return get_all_graph()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/graph/clear")
+async def delete_graph():
+    try:
+        clear_graph()
+        return {"status": "success", "message": "Knowledge graph cleared."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

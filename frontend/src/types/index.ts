@@ -1,4 +1,4 @@
-export type Mode = 'chat' | 'rag' | 'agent' | 'eval'
+export type Mode = 'chat' | 'rag' | 'agent' | 'eval' | 'graph'
 
 export interface ToolCall {
   tool: string
@@ -37,6 +37,7 @@ export interface RagOptions {
   useHybrid: boolean
   useRerank: boolean
   rewriteQuery: boolean
+  useGraph: boolean
 }
 
 export interface EvalResult {
@@ -49,4 +50,13 @@ export interface EvalResult {
 export interface SessionInfo {
   session_id: string
   turns: number
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  mode: Mode;
+  messages: Message[];
+  model: string;
+  createdAt: string;
 }

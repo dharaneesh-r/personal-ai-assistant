@@ -5,12 +5,13 @@ const BASE = ''
 export async function streamChat(
   prompt: string,
   model: string,
+  history: { role: string; content: string }[],
   onToken: (token: string) => void
 ): Promise<void> {
   const res = await fetch(`${BASE}/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, model }),
+    body: JSON.stringify({ prompt, model, history }),
   })
   const reader = res.body!.getReader()
   const dec = new TextDecoder()
@@ -33,7 +34,12 @@ export async function streamChat(
   }
 }
 
-export async function queryRag(question: string, model: string, opts: RagOptions) {
+export async function queryRag(
+  question: string,
+  model: string,
+  opts: RagOptions,
+  history: { user: string; assistant: string }[]
+) {
   const res = await fetch(`${BASE}/rag/query`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -44,6 +50,8 @@ export async function queryRag(question: string, model: string, opts: RagOptions
       use_hybrid: opts.useHybrid,
       use_rerank: opts.useRerank,
       rewrite_query: opts.rewriteQuery,
+      use_graph: opts.useGraph,
+      history,
     }),
   })
   if (!res.ok) throw new Error((await res.json()).detail)
@@ -128,6 +136,18 @@ export async function runEval(question: string, answer: string, context: string,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ question, answer, context, model }),
   })
+  if (!res.ok) throw new Error((await res.json()).detail)
+  return res.json()
+}
+
+export async function getGraph() {
+  const res = await fetch(`${BASE}/rag/graph`)
+  if (!res.ok) throw new Error((await res.json()).detail)
+  return res.json()
+}
+
+export async function clearGraph() {
+  const res = await fetch(`${BASE}/rag/graph/clear`, { method: 'DELETE' })
   if (!res.ok) throw new Error((await res.json()).detail)
   return res.json()
 }

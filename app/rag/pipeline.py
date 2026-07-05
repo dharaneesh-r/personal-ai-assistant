@@ -1,13 +1,19 @@
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from groq import Groq
 
 from app.config import settings
 from app.rag.retriever import retrieve
+from app.rag.graphstore import get_neighborhood
 
 _SYSTEM_PROMPT = (
     "You are a helpful assistant. Answer the user's question using ONLY the context "
-    "provided below. If the context does not contain enough information, say so honestly."
+    "provided below. If the context does not contain enough information, say so honestly. "
+    "Be extremely forgiving of typos, spelling mistakes, and grammatical issues. "
+    "Intelligently deduce user intent and answer directly instead of asking for clarifications. "
+    "If the user asks for a chart or table, output the requested chart (in Mermaid format) or table "
+    "based on the context of the conversation."
 )
 
 _CONTEXT_TEMPLATE = """Context:
@@ -28,6 +34,36 @@ def _build_context(chunks: List[Dict[str, Any]]) -> str:
     return "\n\n".join(parts)
 
 
+_EXTRACT_ENTITIES_PROMPT = """Identify the main names, technologies, key concepts, or noun entities in the following question.
+Respond with a JSON object containing a key "entities" mapping to a list of extracted strings.
+Do not include any other text.
+
+Question: {question}
+
+Example Output:
+{{
+  "entities": ["FastAPI", "Python", "John Doe"]
+}}"""
+
+
+def _extract_entities_from_query(question: str, client: Groq, model: str) -> List[str]:
+    try:
+        completion = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": _EXTRACT_ENTITIES_PROMPT.format(question=question)}],
+            response_format={"type": "json_object"},
+            max_tokens=100,
+            temperature=0.0
+        )
+        raw = completion.choices[0].message.content.strip()
+        data = json.loads(raw)
+        return data.get("entities", [])
+    except Exception:
+        import re
+        words = re.findall(r'\b[A-Z][a-zA-Z0-9_]*\b', question)
+        return list(set(words))
+
+
 def _rewrite_query(question: str, client: Groq, model: str) -> str:
     completion = client.chat.completions.create(
         model=model,
@@ -46,6 +82,7 @@ def rag_query(
     use_hybrid: bool = False,
     use_rerank: bool = False,
     rewrite_query: bool = False,
+    use_graph: bool = False,
     history: Optional[List[Tuple[str, str]]] = None,
 ) -> Dict[str, Any]:
     resolved_model = model or settings.default_model
@@ -66,7 +103,16 @@ def rag_query(
         use_rerank=use_rerank,
     )
 
-    if not chunks:
+    graph_facts = []
+    graph_sources = []
+    if use_graph:
+        entities = _extract_entities_from_query(question, client, resolved_model)
+        if entities:
+            res = get_neighborhood(entities)
+            graph_facts = res.get("facts", [])
+            graph_sources = res.get("sources", [])
+
+    if not chunks and not graph_facts:
         return {
             "answer": "I could not find any relevant information in the knowledge base.",
             "sources": [],
@@ -75,7 +121,15 @@ def rag_query(
             "rewritten_query": rewritten,
         }
 
-    context = _build_context(chunks)
+    # Format the context
+    context_parts = []
+    if use_graph and graph_facts:
+        context_parts.append("Graph Knowledge Base Facts:\n" + "\n".join(graph_facts))
+    
+    if chunks:
+        context_parts.append("Retrieved Text Passages:\n" + _build_context(chunks))
+        
+    context = "\n\n".join(context_parts)
     prompt = _CONTEXT_TEMPLATE.format(context=context, question=question)
 
     messages: List[Dict[str, Any]] = [{"role": "system", "content": _SYSTEM_PROMPT}]
@@ -87,9 +141,12 @@ def rag_query(
 
     completion = client.chat.completions.create(model=resolved_model, messages=messages)
 
+    # Combine sources from both vector store and knowledge graph
+    all_sources = list(set([c["source"] for c in chunks] + graph_sources))
+
     return {
         "answer": completion.choices[0].message.content,
-        "sources": list({c["source"] for c in chunks}),
+        "sources": all_sources,
         "chunks_used": len(chunks),
         "model": resolved_model,
         "rewritten_query": rewritten,

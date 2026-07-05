@@ -4,7 +4,8 @@ import Sidebar from './components/Sidebar'
 import MessageItem from './components/MessageItem'
 import EvalPanel from './components/EvalPanel'
 import DebugPanel from './components/DebugPanel'
-import type { Mode, Message, Source, RagOptions } from './types'
+import GraphVisualizer from './components/GraphVisualizer'
+import type { Mode, Message, Source, RagOptions, ChatSession } from './types'
 import { streamChat, queryRag, runAgent, getSources, createSession, deleteSession, clearAllSources } from './api/client'
 
 const MODELS = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile']
@@ -26,10 +27,14 @@ export default function App() {
   const [showOptions, setShowOptions] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
 
+  // Chat history sessions (Claude-like)
+  const [chats, setChats] = useState<ChatSession[]>([])
+  const [activeChatId, setActiveChatId] = useState<string | null>(null)
+
   // RAG options
   const [ragOpts, setRagOpts] = useState<RagOptions>({
     topK: 5, scoreThreshold: 0.15,
-    useHybrid: true, useRerank: false, rewriteQuery: false,
+    useHybrid: true, useRerank: false, rewriteQuery: false, useGraph: false,
   })
 
   // Agent sessions
@@ -39,7 +44,42 @@ export default function App() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
-  useEffect(() => { loadSources() }, [])
+  // Load chats on mount
+  useEffect(() => {
+    loadSources()
+    const saved = localStorage.getItem('groq_workspace_chats')
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        setChats(parsed)
+        const lastActive = localStorage.getItem('groq_workspace_active_chat')
+        if (lastActive && parsed.some((c: any) => c.id === lastActive)) {
+          setActiveChatId(lastActive)
+          const active = parsed.find((c: any) => c.id === lastActive)
+          if (active) {
+            setMessages(active.messages)
+            setMode(active.mode)
+            setModel(active.model)
+          }
+        }
+      } catch {}
+    }
+  }, [])
+
+  // Sync chats to localStorage
+  useEffect(() => {
+    localStorage.setItem('groq_workspace_chats', JSON.stringify(chats))
+  }, [chats])
+
+  // Sync activeChatId to localStorage
+  useEffect(() => {
+    if (activeChatId) {
+      localStorage.setItem('groq_workspace_active_chat', activeChatId)
+    } else {
+      localStorage.removeItem('groq_workspace_active_chat')
+    }
+  }, [activeChatId])
+
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   async function loadSources() {
@@ -60,6 +100,7 @@ export default function App() {
       rag: 'llama-3.1-8b-instant',
       agent: 'llama-3.3-70b-versatile',
       eval: 'llama-3.1-8b-instant',
+      graph: 'llama-3.1-8b-instant',
     }
     setModel(defaultModels[m])
   }
@@ -72,37 +113,85 @@ export default function App() {
     inputRef.current!.style.height = 'auto'
 
     const userMsg: Message = { id: uid(), role: 'user', content: text, mode, timestamp: new Date() }
-    setMessages(p => [...p, userMsg])
-
     const aiId = uid()
     const aiMsg: Message = { id: aiId, role: 'assistant', content: '', mode, timestamp: new Date(), model, streaming: true }
-    setMessages(p => [...p, aiMsg])
+
+    const chatId = activeChatId || uid()
+    const isNew = !activeChatId
+    const chatTitle = isNew ? (text.slice(0, 28) + (text.length > 28 ? '...' : '')) : ''
+
+    // Format history before updating state
+    const chatHistory = messages.map(m => ({ role: m.role, content: m.content }))
+    
+    const ragHistory: { user: string; assistant: string }[] = []
+    for (let i = 0; i < messages.length; i += 2) {
+      if (messages[i] && messages[i + 1]) {
+        ragHistory.push({ user: messages[i].content, assistant: messages[i + 1].content })
+      }
+    }
+
+    if (isNew) {
+      const newChat: ChatSession = {
+        id: chatId,
+        title: chatTitle,
+        mode,
+        messages: [userMsg, aiMsg],
+        model,
+        createdAt: new Date().toISOString()
+      }
+      setChats(p => [newChat, ...p])
+      setActiveChatId(chatId)
+    } else {
+      setChats(p => p.map(c => c.id === chatId ? { ...c, messages: [...c.messages, userMsg, aiMsg] } : c))
+    }
+
+    setMessages(p => [...p, userMsg, aiMsg])
 
     try {
       if (mode === 'chat') {
-        await streamChat(text, model, token => {
-          setMessages(p => p.map(m => m.id === aiId ? { ...m, content: m.content + token } : m))
+        await streamChat(text, model, chatHistory, token => {
+          setMessages(p => {
+            const next = p.map(m => m.id === aiId ? { ...m, content: m.content + token } : m)
+            setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
+            return next
+          })
         })
-        setMessages(p => p.map(m => m.id === aiId ? { ...m, streaming: false } : m))
+        setMessages(p => {
+          const next = p.map(m => m.id === aiId ? { ...m, streaming: false } : m)
+          setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
+          return next
+        })
 
       } else if (mode === 'rag') {
-        const data = await queryRag(text, model, ragOpts)
-        setMessages(p => p.map(m => m.id === aiId ? {
-          ...m, content: data.answer, streaming: false,
-          sources: data.sources, chunksUsed: data.chunks_used,
-          rewrittenQuery: data.rewritten_query || undefined,
-        } : m))
+        const data = await queryRag(text, model, ragOpts, ragHistory)
+        setMessages(p => {
+          const next = p.map(m => m.id === aiId ? {
+            ...m, content: data.answer, streaming: false,
+            sources: data.sources, chunksUsed: data.chunks_used,
+            rewrittenQuery: data.rewritten_query || undefined,
+          } : m)
+          setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
+          return next
+        })
 
       } else if (mode === 'agent') {
         const data = await runAgent(text, model, activeSession || undefined)
-        setMessages(p => p.map(m => m.id === aiId ? {
-          ...m, content: data.answer, streaming: false,
-          toolCalls: data.tool_calls_made, iterations: data.iterations,
-          sessionId: data.session_id || undefined,
-        } : m))
+        setMessages(p => {
+          const next = p.map(m => m.id === aiId ? {
+            ...m, content: data.answer, streaming: false,
+            toolCalls: data.tool_calls_made, iterations: data.iterations,
+            sessionId: data.session_id || undefined,
+          } : m)
+          setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
+          return next
+        })
       }
     } catch (e: any) {
-      setMessages(p => p.map(m => m.id === aiId ? { ...m, content: '⚠️ ' + e.message, streaming: false } : m))
+      setMessages(p => {
+        const next = p.map(m => m.id === aiId ? { ...m, content: '⚠️ ' + e.message, streaming: false } : m)
+        setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
+        return next
+      })
     }
     setLoading(false)
     inputRef.current?.focus()
@@ -132,6 +221,31 @@ export default function App() {
     toast('Session deleted', 'ok')
   }
 
+  function handleDeleteChat(id: string) {
+    setChats(p => p.filter(c => c.id !== id))
+    if (activeChatId === id) {
+      setActiveChatId(null)
+      setMessages([])
+    }
+    toast('Conversation deleted', 'info')
+  }
+
+  function handleSelectChat(id: string) {
+    const active = chats.find(c => c.id === id)
+    if (active) {
+      setActiveChatId(id)
+      setMessages(active.messages)
+      setMode(active.mode)
+      setModel(active.model)
+    }
+  }
+
+  function handleNewChat() {
+    setActiveChatId(null)
+    setMessages([])
+    toast('Started new conversation', 'ok')
+  }
+
   const tabCls = (t: Mode) => {
     const base = 'px-4 py-2 rounded-xl text-sm font-medium transition-all cursor-pointer border'
     const active: Record<Mode, string> = {
@@ -139,18 +253,20 @@ export default function App() {
       rag: 'bg-cyan-600/20 border-cyan-600/40 text-cyan-300',
       agent: 'bg-orange-600/20 border-orange-600/40 text-orange-300',
       eval: 'bg-green-600/20 border-green-600/40 text-green-300',
+      graph: 'bg-teal-600/20 border-teal-600/40 text-teal-300',
     }
     const inactive = 'bg-transparent border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600'
     return `${base} ${mode === t ? active[t] : inactive}`
   }
 
-  const modeIcon: Record<Mode, string> = { chat: '💬', rag: '🔍', agent: '🤖', eval: '📊' }
-  const modeLabel: Record<Mode, string> = { chat: 'Chat', rag: 'RAG', agent: 'Agent', eval: 'Eval' }
+  const modeIcon: Record<Mode, string> = { chat: '💬', rag: '🔍', agent: '🤖', eval: '📊', graph: '🕸️' }
+  const modeLabel: Record<Mode, string> = { chat: 'Chat', rag: 'RAG', agent: 'Agent', eval: 'Eval', graph: 'Graph' }
   const placeholders: Record<Mode, string> = {
     chat: 'Message Groq...',
     rag: 'Ask about your documents...',
     agent: 'Ask the agent anything...',
     eval: '',
+    graph: '',
   }
 
   const emptyMsgs: Record<Mode, { icon: string; title: string; sub: string; pills: string[] }> = {
@@ -158,17 +274,27 @@ export default function App() {
     rag: { icon: '🔍', title: 'Ask about your documents', sub: 'Retrieval-augmented generation from your knowledge base', pills: ["What are Dharaneesh's skills?", 'Summarize the Scrolla project', 'What tech stack is used?'] },
     agent: { icon: '🤖', title: 'Agent is ready', sub: 'Tools: rag_lookup · web_search · calculator · run_python', pills: ['Search the web for latest AI news', 'What is 2^32?', 'Run some Python code'] },
     eval: { icon: '📊', title: 'Evaluate your RAG pipeline', sub: '', pills: [] },
+    graph: { icon: '🕸️', title: 'Knowledge Graph', sub: '', pills: [] },
   }
 
   return (
     <div className="flex h-screen bg-gray-800 text-gray-100 overflow-hidden">
-      <Sidebar sources={sources} mode={mode} onSourcesChange={loadSources} onToast={toast}
+      <Sidebar
+        sources={sources}
+        mode={mode}
+        onSourcesChange={loadSources}
+        onToast={toast}
         onClearAll={async () => {
           if (!confirm('Delete ALL sources from the knowledge base?')) return
           const r = await clearAllSources()
           toast(`Removed ${r.deleted_sources} sources (${r.deleted_chunks} chunks)`, 'ok')
           loadSources()
         }}
+        chats={chats}
+        activeChatId={activeChatId}
+        onSelectChat={handleSelectChat}
+        onNewChat={handleNewChat}
+        onDeleteChat={handleDeleteChat}
       />
 
       {/* Main */}
@@ -176,7 +302,7 @@ export default function App() {
 
         {/* Top bar */}
         <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-700 bg-gray-850 flex-shrink-0">
-          {(['chat', 'rag', 'agent', 'eval'] as Mode[]).map(t => (
+          {(['chat', 'rag', 'agent', 'eval', 'graph'] as Mode[]).map(t => (
             <button key={t} onClick={() => switchMode(t)} className={tabCls(t)}>
               {modeIcon[t]} {modeLabel[t]}
             </button>
@@ -213,6 +339,7 @@ export default function App() {
               { key: 'useHybrid', label: 'Hybrid Search' },
               { key: 'useRerank', label: 'Re-rank' },
               { key: 'rewriteQuery', label: 'Query Rewrite' },
+              { key: 'useGraph', label: 'Use Graph RAG' },
             ].map(opt => (
               <label key={opt.key} className="flex items-center gap-1.5 text-gray-300 cursor-pointer select-none">
                 <input
@@ -259,6 +386,8 @@ export default function App() {
         {/* Eval panel */}
         {mode === 'eval' ? (
           <EvalPanel model={model} onToast={toast} />
+        ) : mode === 'graph' ? (
+          <GraphVisualizer />
         ) : (
           <>
             {/* Messages */}
