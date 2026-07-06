@@ -13,7 +13,14 @@ _SYSTEM_PROMPT = (
     "Be extremely forgiving of typos, spelling mistakes, and grammatical issues. "
     "Intelligently deduce user intent and answer directly instead of asking for clarifications. "
     "If the user asks for a chart or table, output the requested chart (in Mermaid format) or table "
-    "based on the context of the conversation."
+    "based on the context of the conversation. "
+    "IMPORTANT: When generating Mermaid charts, you MUST obey these syntax rules:\n"
+    "1. Node IDs (variable names) must be strictly single alphanumeric words without spaces, dots, or special characters. Use snake_case (e.g. dharaneesh_r or node_js).\n"
+    "2. Always enclose node labels in double quotes (e.g., dharaneesh_r[\"Dharaneesh R\"] or node_js[\"Node.js\"]).\n"
+    "3. Links with text must be formatted as: A -->|text| B (do NOT write A -->|text|> B).\n"
+    "Example of correct code:\n"
+    "graph TB\n"
+    "    dharaneesh[\"Dharaneesh R\"] -->|Skills| node_js[\"Node.js\"]"
 )
 
 _CONTEXT_TEMPLATE = """Context:
