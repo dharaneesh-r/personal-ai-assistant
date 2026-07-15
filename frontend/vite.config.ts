@@ -11,6 +11,7 @@ export default defineConfig({
       '/agent':  'http://127.0.0.1:8000',
       '/ingest': 'http://127.0.0.1:8000',
       '/eval':   'http://127.0.0.1:8000',
+      '/history': 'http://127.0.0.1:8000',
     },
   },
   build: {

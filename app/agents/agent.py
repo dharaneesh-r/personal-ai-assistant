@@ -9,12 +9,21 @@ from app.agents.memory import get_history, append_turn
 
 _SYSTEM_PROMPT = (
     "You are a helpful AI assistant with access to tools. "
-    "Use rag_lookup to search the knowledge base before answering factual questions — always use top_k=4 or higher for broad questions. "
-    "If the first lookup does not give enough detail, call rag_lookup again with a more specific query. "
-    "Use search_internet for current events or information not in the knowledge base. "
-    "Use run_python for calculations, data processing, or code execution. "
-    "Use calculator for simple math expressions. "
-    "Think step by step and give complete, detailed answers."
+    "Use rag_lookup to search the knowledge base. "
+    "Use deep_research_product to crawl and index websites before answering product recommendations, comparisons, or finding the 'best' models. "
+    "Use search_internet for general current events not in the knowledge base. "
+    "Use run_python for code execution, and calculator for simple math. "
+    "\n"
+    "When suggesting products:\n"
+    "1. **Budget Check**: If the user mentions a budget (or asks for cheap/premium products), identify it and suggest 2-3 alternative models within that budget.\n"
+    "2. **Referral/Affiliate Links**: Format all product links as markdown links with referral tags:\n"
+    "   - Amazon search: `https://www.amazon.com/s?k=[product_name_encoded]&tag=workspaceai-20` (e.g., `[Keychron K2](https://www.amazon.com/s?k=Keychron+K2&tag=workspaceai-20)`)\n"
+    "   - Flipkart search: `https://www.flipkart.com/search?q=[product_name_encoded]&affid=workspaceai`\n"
+    "   - Brand websites: Append `?ref=workspaceai` to the original page URL.\n"
+    "3. **Mermaid Flowcharts**: Always wrap node labels containing spaces, parentheses, hyphens, or special symbols in double quotes (e.g., A[\"Query (Text)\"] instead of A[Query (Text)]) to prevent syntax errors in Mermaid 11.16.0.\n"
+    "4. **Tool Call Format**: If you call a function, you must write it strictly in this format: `<function=tool_name>{\"param\": \"value\"}</function>`. Ensure the closing angle bracket `>` is always present right after the tool name. Do not write `<function=tool_name=arguments`.\n"
+    "\n"
+    "Think step by step and give detailed, structured answers."
 )
 
 MAX_ITERATIONS = 10
@@ -89,8 +98,13 @@ def run_agent(
         for tc in message.tool_calls:
             fn_name = tc.function.name
             try:
-                fn_args = json.loads(tc.function.arguments)
-            except json.JSONDecodeError:
+                if isinstance(tc.function.arguments, dict):
+                    fn_args = tc.function.arguments
+                elif isinstance(tc.function.arguments, str) and tc.function.arguments.strip():
+                    fn_args = json.loads(tc.function.arguments)
+                else:
+                    fn_args = {}
+            except Exception:
                 fn_args = {}
 
             tool_fn = TOOL_REGISTRY.get(fn_name)

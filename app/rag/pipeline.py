@@ -85,7 +85,7 @@ def rag_query(
     top_k: int = 5,
     score_threshold: float = 0.1,
     model: Optional[str] = None,
-    source_filter: Optional[str] = None,
+    source_filter: Optional[List[str]] = None,
     use_hybrid: bool = False,
     use_rerank: bool = False,
     rewrite_query: bool = False,

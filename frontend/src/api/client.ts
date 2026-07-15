@@ -51,6 +51,7 @@ export async function queryRag(
       use_rerank: opts.useRerank,
       rewrite_query: opts.rewriteQuery,
       use_graph: opts.useGraph,
+      source_filter: opts.sourceFilter,
       history,
     }),
   })
@@ -148,6 +149,77 @@ export async function getGraph() {
 
 export async function clearGraph() {
   const res = await fetch(`${BASE}/rag/graph/clear`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.json()).detail)
+  return res.json()
+}
+
+// --- History API ---
+
+export async function fetchChats() {
+  const res = await fetch(`${BASE}/history/chats`)
+  if (!res.ok) throw new Error((await res.json()).detail)
+  return res.json()
+}
+
+export async function fetchChatDetail(sessionId: string) {
+  const res = await fetch(`${BASE}/history/chats/${sessionId}`)
+  if (!res.ok) throw new Error((await res.json()).detail)
+  return res.json()
+}
+
+export async function saveSessionOnBackend(session: { id: string; title: string; mode: string; model: string; created_at: string }) {
+  const res = await fetch(`${BASE}/history/chats`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(session),
+  })
+  if (!res.ok) throw new Error((await res.json()).detail)
+  return res.json()
+}
+
+export async function appendMessageOnBackend(
+  sessionId: string,
+  message: {
+    id: string
+    role: string
+    content: string
+    mode: string
+    timestamp: string
+    sources?: string[]
+    chunks_used?: number
+    rewritten_query?: string
+    tool_calls?: any[]
+    iterations?: number
+    model?: string
+  }
+) {
+  const res = await fetch(`${BASE}/history/chats/${sessionId}/message`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(message),
+  })
+  if (!res.ok) throw new Error((await res.json()).detail)
+  return res.json()
+}
+
+export async function deleteChatOnBackend(sessionId: string) {
+  const res = await fetch(`${BASE}/history/chats/${sessionId}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error((await res.json()).detail)
+  return res.json()
+}
+
+export async function saveEvalRecord(evalRecord: any) {
+  const res = await fetch(`${BASE}/history/evaluations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(evalRecord),
+  })
+  if (!res.ok) throw new Error((await res.json()).detail)
+  return res.json()
+}
+
+export async function fetchEvaluations() {
+  const res = await fetch(`${BASE}/history/evaluations`)
   if (!res.ok) throw new Error((await res.json()).detail)
   return res.json()
 }

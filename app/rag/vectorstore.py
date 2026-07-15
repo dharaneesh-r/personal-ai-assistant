@@ -1,6 +1,6 @@
 import uuid
 from functools import lru_cache
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import chromadb
 
@@ -70,7 +70,7 @@ def delete_source(source: str) -> int:
     return len(ids)
 
 
-def search(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
+def search(query: str, top_k: int = 5, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     collection = _get_collection()
     total = collection.count()
     if total == 0:
@@ -79,6 +79,7 @@ def search(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
     results = collection.query(
         query_embeddings=[embed_texts([query])[0]],
         n_results=min(top_k, total),
+        where=where,
         include=["documents", "metadatas", "distances"],
     )
 

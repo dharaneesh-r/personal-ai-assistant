@@ -1,15 +1,15 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from rank_bm25 import BM25Okapi
 
 from app.rag.vectorstore import search, _get_collection
 
 
-def _fetch_all_docs() -> List[Dict[str, Any]]:
+def _fetch_all_docs(where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
     collection = _get_collection()
     if collection.count() == 0:
         return []
-    result = collection.get(include=["documents", "metadatas"])
+    result = collection.get(include=["documents", "metadatas"], where=where)
     return [
         {
             "text": result["documents"][i],
@@ -30,13 +30,13 @@ def _rrf(ranks: List[List[int]], k: int = 60) -> List[float]:
     return scores
 
 
-def hybrid_search(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
-    all_docs = _fetch_all_docs()
+def hybrid_search(query: str, top_k: int = 5, where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    all_docs = _fetch_all_docs(where=where)
     if not all_docs:
         return []
 
     # Vector search — get 2x candidates
-    vector_results = search(query, top_k=min(top_k * 2, len(all_docs)))
+    vector_results = search(query, top_k=min(top_k * 2, len(all_docs)), where=where)
     vector_texts = [r["text"] for r in vector_results]
 
     # BM25 search over all docs

@@ -6,7 +6,10 @@ import EvalPanel from './components/EvalPanel'
 import DebugPanel from './components/DebugPanel'
 import GraphVisualizer from './components/GraphVisualizer'
 import type { Mode, Message, Source, RagOptions, ChatSession } from './types'
-import { streamChat, queryRag, runAgent, getSources, createSession, deleteSession, clearAllSources } from './api/client'
+import {
+  streamChat, queryRag, runAgent, getSources, createSession, deleteSession, clearAllSources,
+  fetchChats, fetchChatDetail, saveSessionOnBackend, appendMessageOnBackend, deleteChatOnBackend, saveEvalRecord, fetchEvaluations
+} from './api/client'
 
 const MODELS = ['llama-3.1-8b-instant', 'llama-3.3-70b-versatile']
 
@@ -23,6 +26,7 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [model, setModel] = useState('llama-3.1-8b-instant')
   const [sources, setSources] = useState<Source[]>([])
+  const [selectedSources, setSelectedSources] = useState<string[]>([])
   const [toasts, setToasts] = useState<Toast[]>([])
   const [showOptions, setShowOptions] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
@@ -37,6 +41,12 @@ export default function App() {
     useHybrid: true, useRerank: false, rewriteQuery: false, useGraph: false,
   })
 
+  const handleToggleSource = useCallback((source: string) => {
+    setSelectedSources(prev =>
+      prev.includes(source) ? prev.filter(s => s !== source) : [...prev, source]
+    )
+  }, [])
+
   // Agent sessions
   const [sessions, setSessions] = useState<{ id: string; label: string }[]>([])
   const [activeSession, setActiveSession] = useState<string>('')
@@ -47,29 +57,30 @@ export default function App() {
   // Load chats on mount
   useEffect(() => {
     loadSources()
-    const saved = localStorage.getItem('groq_workspace_chats')
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        setChats(parsed)
-        const lastActive = localStorage.getItem('groq_workspace_active_chat')
-        if (lastActive && parsed.some((c: any) => c.id === lastActive)) {
-          setActiveChatId(lastActive)
-          const active = parsed.find((c: any) => c.id === lastActive)
-          if (active) {
-            setMessages(active.messages)
-            setMode(active.mode)
-            setModel(active.model)
-          }
-        }
-      } catch {}
-    }
+    loadSessionsFromBackend()
   }, [])
 
-  // Sync chats to localStorage
-  useEffect(() => {
-    localStorage.setItem('groq_workspace_chats', JSON.stringify(chats))
-  }, [chats])
+  async function loadSessionsFromBackend() {
+    try {
+      const data = await fetchChats()
+      const mappedChats: ChatSession[] = data.map((c: any) => ({
+        id: c.id,
+        title: c.title,
+        mode: c.mode,
+        model: c.model,
+        messages: [],
+        createdAt: c.created_at
+      }))
+      setChats(mappedChats)
+
+      const lastActive = localStorage.getItem('groq_workspace_active_chat')
+      if (lastActive && mappedChats.some(c => c.id === lastActive)) {
+        handleSelectChat(lastActive)
+      }
+    } catch (e: any) {
+      toast('Failed to load chats: ' + e.message, 'err')
+    }
+  }
 
   // Sync activeChatId to localStorage
   useEffect(() => {
@@ -83,7 +94,12 @@ export default function App() {
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   async function loadSources() {
-    try { setSources(await getSources()) } catch {}
+    try {
+      const data = await getSources()
+      setSources(data)
+      const sourceNames = data.map((s: any) => s.source)
+      setSelectedSources(prev => prev.filter(s => sourceNames.includes(s)))
+    } catch {}
   }
 
   function toast(msg: string, type: 'ok' | 'err' | 'info' = 'ok') {
@@ -130,6 +146,7 @@ export default function App() {
       }
     }
 
+    const sessionCreatedAt = new Date().toISOString()
     if (isNew) {
       const newChat: ChatSession = {
         id: chatId,
@@ -137,10 +154,15 @@ export default function App() {
         mode,
         messages: [userMsg, aiMsg],
         model,
-        createdAt: new Date().toISOString()
+        createdAt: sessionCreatedAt
       }
       setChats(p => [newChat, ...p])
       setActiveChatId(chatId)
+      try {
+        await saveSessionOnBackend({ id: chatId, title: chatTitle, mode, model, created_at: sessionCreatedAt })
+      } catch (e: any) {
+        toast('Failed to save session: ' + e.message, 'err')
+      }
     } else {
       setChats(p => p.map(c => c.id === chatId ? { ...c, messages: [...c.messages, userMsg, aiMsg] } : c))
     }
@@ -148,8 +170,22 @@ export default function App() {
     setMessages(p => [...p, userMsg, aiMsg])
 
     try {
+      await appendMessageOnBackend(chatId, {
+        id: userMsg.id,
+        role: userMsg.role,
+        content: userMsg.content,
+        mode: userMsg.mode,
+        timestamp: userMsg.timestamp.toISOString()
+      })
+    } catch (e: any) {
+      toast('Failed to save user message: ' + e.message, 'err')
+    }
+
+    try {
       if (mode === 'chat') {
+        let aiContent = ''
         await streamChat(text, model, chatHistory, token => {
+          aiContent += token
           setMessages(p => {
             const next = p.map(m => m.id === aiId ? { ...m, content: m.content + token } : m)
             setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
@@ -161,9 +197,17 @@ export default function App() {
           setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
           return next
         })
+        await appendMessageOnBackend(chatId, {
+          id: aiId,
+          role: 'assistant',
+          content: aiContent,
+          mode,
+          timestamp: new Date().toISOString(),
+          model
+        })
 
       } else if (mode === 'rag') {
-        const data = await queryRag(text, model, ragOpts, ragHistory)
+        const data = await queryRag(text, model, { ...ragOpts, sourceFilter: selectedSources.length > 0 ? selectedSources : undefined }, ragHistory)
         setMessages(p => {
           const next = p.map(m => m.id === aiId ? {
             ...m, content: data.answer, streaming: false,
@@ -172,6 +216,17 @@ export default function App() {
           } : m)
           setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
           return next
+        })
+        await appendMessageOnBackend(chatId, {
+          id: aiId,
+          role: 'assistant',
+          content: data.answer,
+          mode,
+          timestamp: new Date().toISOString(),
+          model,
+          sources: data.sources,
+          chunks_used: data.chunks_used,
+          rewritten_query: data.rewritten_query || undefined
         })
 
       } else if (mode === 'agent') {
@@ -185,13 +240,34 @@ export default function App() {
           setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
           return next
         })
+        await appendMessageOnBackend(chatId, {
+          id: aiId,
+          role: 'assistant',
+          content: data.answer,
+          mode,
+          timestamp: new Date().toISOString(),
+          model,
+          tool_calls: data.tool_calls_made,
+          iterations: data.iterations
+        })
       }
     } catch (e: any) {
+      const errContent = '⚠️ ' + e.message
       setMessages(p => {
-        const next = p.map(m => m.id === aiId ? { ...m, content: '⚠️ ' + e.message, streaming: false } : m)
+        const next = p.map(m => m.id === aiId ? { ...m, content: errContent, streaming: false } : m)
         setChats(chatsPrev => chatsPrev.map(c => c.id === chatId ? { ...c, messages: next } : c))
         return next
       })
+      try {
+        await appendMessageOnBackend(chatId, {
+          id: aiId,
+          role: 'assistant',
+          content: errContent,
+          mode,
+          timestamp: new Date().toISOString(),
+          model
+        })
+      } catch {}
     }
     setLoading(false)
     inputRef.current?.focus()
@@ -221,22 +297,43 @@ export default function App() {
     toast('Session deleted', 'ok')
   }
 
-  function handleDeleteChat(id: string) {
-    setChats(p => p.filter(c => c.id !== id))
-    if (activeChatId === id) {
-      setActiveChatId(null)
-      setMessages([])
+  async function handleDeleteChat(id: string) {
+    try {
+      await deleteChatOnBackend(id)
+      setChats(p => p.filter(c => c.id !== id))
+      if (activeChatId === id) {
+        setActiveChatId(null)
+        setMessages([])
+      }
+      toast('Conversation deleted', 'info')
+    } catch (e: any) {
+      toast('Failed to delete chat: ' + e.message, 'err')
     }
-    toast('Conversation deleted', 'info')
   }
 
-  function handleSelectChat(id: string) {
-    const active = chats.find(c => c.id === id)
-    if (active) {
+  async function handleSelectChat(id: string) {
+    try {
+      const detail = await fetchChatDetail(id)
+      const fullMessages: Message[] = detail.messages.map((m: any) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        mode: m.mode,
+        timestamp: new Date(m.timestamp),
+        sources: m.sources,
+        chunksUsed: m.chunks_used,
+        rewrittenQuery: m.rewritten_query,
+        toolCalls: m.tool_calls,
+        iterations: m.iterations,
+        model: m.model
+      }))
+
       setActiveChatId(id)
-      setMessages(active.messages)
-      setMode(active.mode)
-      setModel(active.model)
+      setMessages(fullMessages)
+      setMode(detail.session.mode)
+      setModel(detail.session.model)
+    } catch (e: any) {
+      toast('Failed to load chat details: ' + e.message, 'err')
     }
   }
 
@@ -295,6 +392,8 @@ export default function App() {
         onSelectChat={handleSelectChat}
         onNewChat={handleNewChat}
         onDeleteChat={handleDeleteChat}
+        selectedSources={selectedSources}
+        onToggleSource={handleToggleSource}
       />
 
       {/* Main */}

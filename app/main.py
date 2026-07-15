@@ -3,22 +3,23 @@ import os
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from app.api.routes_agent import router as agent_router
 from app.api.routes_chat import router as chat_router
 from app.api.routes_eval import router as eval_router
 from app.api.routes_ingest import router as ingest_router
 from app.api.routes_rag import router as rag_router
+from app.api.routes_history import router as history_router
 from app.auth import verify_api_key
 from app.config import settings
 from app.logger import LoggingMiddleware, logger
+from app.limiter import limiter
+from app.database import init_db
 
 os.makedirs("logs", exist_ok=True)
-
-limiter = Limiter(key_func=get_remote_address)
+init_db()
 
 app = FastAPI(title="Groq AI Workspace")
 app.state.limiter = limiter
@@ -32,6 +33,7 @@ app.include_router(ingest_router, dependencies=_deps)
 app.include_router(rag_router, dependencies=_deps)
 app.include_router(agent_router, dependencies=_deps)
 app.include_router(eval_router, dependencies=_deps)
+app.include_router(history_router, dependencies=_deps)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

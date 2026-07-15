@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request
 
 from app.api.models import ChunkPreview, IngestResponse, IngestTextRequest, IngestUrlRequest
 from app.ingestion.loader import load_file, load_url
@@ -8,6 +8,8 @@ from app.ingestion.processor import process_document
 from app.rag.vectorstore import add_chunks
 from app.ingestion.graph_extractor import extract_graph_from_text
 from app.rag.graphstore import add_entities_and_relations
+from app.config import settings
+from app.limiter import limiter
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
@@ -24,17 +26,19 @@ def _extract_and_store_graph(text: str, source: str):
 
 
 @router.post("/text", response_model=IngestResponse)
-async def ingest_text(request: IngestTextRequest):
-    if not request.text.strip():
+@limiter.limit(f"{settings.rate_limit_default}/minute")
+async def ingest_text(request: Request, ingest_request: IngestTextRequest):
+    if not ingest_request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
-    chunks = process_document(request.text, source=request.source_name, source_type="text")
+    chunks = process_document(ingest_request.text, source=ingest_request.source_name, source_type="text")
     stored = add_chunks(chunks)
-    _extract_and_store_graph(request.text, request.source_name)
-    return _build_response(request.source_name, "text", chunks, stored)
+    _extract_and_store_graph(ingest_request.text, ingest_request.source_name)
+    return _build_response(ingest_request.source_name, "text", chunks, stored)
 
 
 @router.post("/file", response_model=IngestResponse)
-async def ingest_file(file: UploadFile = File(...)):
+@limiter.limit(f"{settings.rate_limit_default}/minute")
+async def ingest_file(request: Request, file: UploadFile = File(...)):
     suffix = Path(file.filename).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
@@ -59,9 +63,10 @@ async def ingest_file(file: UploadFile = File(...)):
 
 
 @router.post("/url", response_model=IngestResponse)
-async def ingest_url(request: IngestUrlRequest):
+@limiter.limit(f"{settings.rate_limit_default}/minute")
+async def ingest_url(request: Request, ingest_request: IngestUrlRequest):
     try:
-        text = load_url(request.url)
+        text = load_url(ingest_request.url)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
@@ -70,10 +75,10 @@ async def ingest_url(request: IngestUrlRequest):
     if not text.strip():
         raise HTTPException(status_code=400, detail="No text content found at the given URL.")
 
-    chunks = process_document(text, source=request.url, source_type="url")
+    chunks = process_document(text, source=ingest_request.url, source_type="url")
     stored = add_chunks(chunks)
-    _extract_and_store_graph(text, request.url)
-    return _build_response(request.url, "url", chunks, stored)
+    _extract_and_store_graph(text, ingest_request.url)
+    return _build_response(ingest_request.url, "url", chunks, stored)
 
 
 def _build_response(source: str, source_type: str, chunks: list, stored: int) -> IngestResponse:

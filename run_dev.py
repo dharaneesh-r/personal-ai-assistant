@@ -18,7 +18,7 @@ def main():
     if not os.path.exists(uvicorn_bin):
         uvicorn_bin = "uvicorn"
         
-    print("🚀 Starting FastAPI backend and Vite frontend concurrently...")
+    print("Starting FastAPI backend and Vite frontend concurrently...")
     
     backend_cmd = [uvicorn_bin, "app.main:app", "--reload", "--port", "8000"]
     
@@ -59,10 +59,10 @@ def main():
         while True:
             # Check if any process has exited early
             if backend_proc.poll() is not None:
-                print("⚠️ Backend server exited unexpectedly.")
+                print("Backend server exited unexpectedly.")
                 break
             if frontend_proc.poll() is not None:
-                print("⚠️ Frontend server exited unexpectedly.")
+                print("Frontend server exited unexpectedly.")
                 break
             time.sleep(1)
             

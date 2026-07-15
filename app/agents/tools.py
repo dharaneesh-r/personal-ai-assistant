@@ -4,6 +4,9 @@ import sys
 from typing import Any, Dict
 
 from app.rag.retriever import retrieve
+from app.ingestion.loader import load_url
+from app.ingestion.processor import process_document
+from app.rag.vectorstore import add_chunks
 
 # --- Tool definitions ---
 
@@ -20,7 +23,6 @@ TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "The search query"},
-                    "top_k": {"type": "integer", "description": "Number of results to return. Use 4 or more for broad questions. Default is 4."},
                 },
                 "required": ["query"],
             },
@@ -65,6 +67,25 @@ TOOL_DEFINITIONS = [
                     "code": {"type": "string", "description": "Python code to execute. Use print() to output results."},
                 },
                 "required": ["code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "deep_research_product",
+            "description": (
+                "Search the web for product brands, websites, e-commerce stores, or reviews, "
+                "then scrape and ingest their contents directly into the local vector store "
+                "so it can be retrieved via rag_lookup. Use this for product recommendations, brand comparison, "
+                "or finding the best keyboard or other hardware."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "The search query to research (e.g. 'zebronics keyboard models', 'best apple keyboard reviews')"},
+                },
+                "required": ["query"],
             },
         },
     },
@@ -122,9 +143,73 @@ def run_python(code: str) -> Dict[str, Any]:
         return {"error": str(e)}
 
 
+def deep_research_product(query: str, max_pages: int = 3) -> Dict[str, Any]:
+    """
+    Search the internet for product websites or pages, scrape their content concurrently, 
+    and ingest them directly into the vector database knowledge base.
+    """
+    import concurrent.futures
+    
+    # 1. Search the web for relevant URLs
+    search_res = web_search(query, max_results=max_pages * 2)
+    if "error" in search_res:
+        return {"error": f"Search failed: {search_res['error']}"}
+        
+    results = search_res.get("results", [])
+    if not results:
+        return {"result": "No product pages or websites found."}
+        
+    crawled_sources = []
+    total_chunks = 0
+    
+    # 2. Scrape top URLs concurrently
+    urls_to_scrape = [r["url"] for r in results][:max_pages]
+    
+    def fetch_page(url: str):
+        try:
+            text = load_url(url)
+            return url, text
+        except Exception:
+            return url, None
+
+    scraped_data = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_pages) as executor:
+        futures = {executor.submit(fetch_page, url): url for url in urls_to_scrape}
+        done, not_done = concurrent.futures.wait(futures.keys(), timeout=8.0)
+        
+        for fut in done:
+            try:
+                url, text = fut.result()
+                if text and len(text.strip()) >= 100:
+                    scraped_data[url] = text
+            except Exception:
+                pass
+                
+        for fut in not_done:
+            fut.cancel()
+
+    # 3. Chunk, process and index scraped data
+    for url, text in scraped_data.items():
+        try:
+            chunks = process_document(text, source=url, source_type="url")
+            stored = add_chunks(chunks)
+            if stored > 0:
+                crawled_sources.append(url)
+                total_chunks += stored
+        except Exception:
+            continue
+            
+    return {
+        "result": f"Successfully crawled and indexed {len(crawled_sources)} pages for '{query}'. Added {total_chunks} chunks to the database.",
+        "crawled_urls": crawled_sources,
+        "chunks_indexed": total_chunks
+    }
+
+
 TOOL_REGISTRY = {
     "rag_lookup": rag_lookup,
     "calculator": calculator,
     "search_internet": web_search,
     "run_python": run_python,
+    "deep_research_product": deep_research_product,
 }

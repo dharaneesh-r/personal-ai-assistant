@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { runEval } from '../api/client'
+import { useState, useEffect } from 'react'
+import { runEval, saveEvalRecord, fetchEvaluations } from '../api/client'
 import type { EvalResult } from '../types'
 
 interface Props {
@@ -13,6 +13,18 @@ export default function EvalPanel({ model, onToast }: Props) {
   const [c, setC] = useState('')
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<EvalResult | null>(null)
+  const [evalHistory, setEvalHistory] = useState<any[]>([])
+
+  useEffect(() => {
+    loadHistory()
+  }, [])
+
+  async function loadHistory() {
+    try {
+      const data = await fetchEvaluations()
+      setEvalHistory(data)
+    } catch {}
+  }
 
   async function run() {
     if (!q.trim() || !a.trim() || !c.trim()) { onToast('Fill all three fields', 'err'); return }
@@ -20,6 +32,26 @@ export default function EvalPanel({ model, onToast }: Props) {
     try {
       const r = await runEval(q, a, c, model)
       setResult(r)
+
+      const evalId = Math.random().toString(36).slice(2)
+      const timestamp = new Date().toISOString()
+      await saveEvalRecord({
+        id: evalId,
+        question: q.trim(),
+        answer: a.trim(),
+        context: c.trim(),
+        overall: r.overall,
+        faithfulness_score: r.faithfulness.score,
+        faithfulness_reason: r.faithfulness.reason,
+        relevance_score: r.relevance.score,
+        relevance_reason: r.relevance.reason,
+        groundedness_score: r.groundedness.score,
+        groundedness_reason: r.groundedness.reason,
+        model,
+        timestamp
+      })
+      loadHistory()
+      onToast('Evaluation completed and saved!', 'ok')
     } catch (e: any) { onToast(e.message, 'err') }
     setLoading(false)
   }
@@ -110,6 +142,34 @@ export default function EvalPanel({ model, onToast }: Props) {
                 </div>
               )
             })}
+          </div>
+        )}
+        {/* History List */}
+        {evalHistory.length > 0 && (
+          <div className="mt-4">
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Evaluation History</h3>
+            <div className="flex flex-col gap-3">
+              {evalHistory.map((item: any) => (
+                <div key={item.id} className="bg-gray-850 border border-gray-700 rounded-2xl p-4 text-xs">
+                  <div className="flex items-center justify-between mb-2 pb-2 border-b border-gray-700">
+                    <span className="text-gray-500 text-[10px]">{new Date(item.timestamp).toLocaleString()}</span>
+                    <span className="bg-gray-900 text-green-400 px-2.5 py-0.5 rounded-full font-bold border border-gray-700">
+                      Score: {item.overall.toFixed(1)} / 5
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div>
+                      <span className="text-gray-500 font-semibold uppercase text-[9px] mr-1">Q:</span>
+                      <span className="text-gray-300">{item.question}</span>
+                    </div>
+                    <div>
+                      <span className="text-gray-500 font-semibold uppercase text-[9px] mr-1">A:</span>
+                      <span className="text-gray-300">{item.answer}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>

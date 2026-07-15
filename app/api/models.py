@@ -76,7 +76,7 @@ class RagQueryRequest(BaseModel):
     top_k: int = 5
     score_threshold: float = 0.2
     model: str = "llama-3.1-8b-instant"
-    source_filter: Optional[str] = None
+    source_filter: Optional[List[str]] = None
     use_hybrid: bool = False
     use_rerank: bool = False
     rewrite_query: bool = False

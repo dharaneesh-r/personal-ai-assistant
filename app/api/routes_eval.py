@@ -1,8 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Optional
 
 from app.eval.evaluator import evaluate, batch_evaluate
+from app.config import settings
+from app.limiter import limiter
 
 router = APIRouter(prefix="/eval", tags=["eval"])
 
@@ -38,13 +40,14 @@ class BatchEvalRequest(BaseModel):
 
 
 @router.post("/run", response_model=EvalResponse)
-async def run_eval(request: EvalRequest):
+@limiter.limit(f"{settings.rate_limit_default}/minute")
+async def run_eval(request: Request, eval_request: EvalRequest):
     try:
         result = evaluate(
-            question=request.question,
-            answer=request.answer,
-            context=request.context,
-            model=request.model,
+            question=eval_request.question,
+            answer=eval_request.answer,
+            context=eval_request.context,
+            model=eval_request.model,
         )
         return EvalResponse(**result)
     except Exception as e:
@@ -52,9 +55,10 @@ async def run_eval(request: EvalRequest):
 
 
 @router.post("/batch")
-async def run_batch_eval(request: BatchEvalRequest):
+@limiter.limit(f"{settings.rate_limit_default}/minute")
+async def run_batch_eval(request: Request, batch_request: BatchEvalRequest):
     try:
-        items = [i.model_dump() for i in request.items]
-        return batch_evaluate(items, model=request.model)
+        items = [i.model_dump() for i in batch_request.items]
+        return batch_evaluate(items, model=batch_request.model)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

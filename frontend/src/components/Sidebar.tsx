@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Upload, Link2, FileText, Trash2, Database, RefreshCw, CheckCircle, Loader2, X, Plus, MessageSquare } from 'lucide-react'
+import { Upload, Link2, FileText, Trash2, Database, RefreshCw, CheckCircle, Loader2, X, Plus, MessageSquare, Square, CheckSquare } from 'lucide-react'
 import type { Source, Mode, ChatSession } from '../types'
 import { ingestFile, ingestUrl, ingestText, deleteSource } from '../api/client'
 
@@ -14,6 +14,8 @@ interface Props {
   onSelectChat: (id: string) => void
   onNewChat: () => void
   onDeleteChat: (id: string) => void
+  selectedSources: string[]
+  onToggleSource: (source: string) => void
 }
 
 type Tab = 'file' | 'url' | 'text'
@@ -39,6 +41,8 @@ export default function Sidebar({
   onSelectChat,
   onNewChat,
   onDeleteChat,
+  selectedSources,
+  onToggleSource,
 }: Props) {
   const [sidebarTab, setSidebarTab] = useState<'chats' | 'docs'>('chats')
   const [tab, setTab] = useState<Tab>('file')
@@ -346,17 +350,27 @@ export default function Sidebar({
                   const name = s.source.split('/').pop()?.split('\\').pop() ?? s.source
                   const maxChunks = Math.max(...sources.map(x => x.chunk_count))
                   const barWidth = Math.round((s.chunk_count / maxChunks) * 100)
+                  const isSelected = selectedSources.includes(s.source)
                   return (
                     <div key={s.source}
-                      className="group rounded-xl bg-gray-800 border border-gray-700 hover:border-gray-600 transition-colors overflow-hidden">
+                      className={`group rounded-xl border transition-all overflow-hidden cursor-pointer ${
+                        isSelected 
+                          ? 'bg-violet-950/10 border-violet-500/40 shadow-sm' 
+                          : 'bg-gray-800 border-gray-700 hover:border-gray-600'
+                      }`}>
                       <div className="flex items-center gap-2 px-2.5 py-2">
-                        <span className="text-sm flex-shrink-0">{typeIcon[s.source_type] ?? '📄'}</span>
-                        <div className="flex-1 min-w-0">
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); onToggleSource(s.source) }}
+                          className={`flex-shrink-0 transition-colors ${isSelected ? 'text-violet-400' : 'text-gray-500 hover:text-gray-400'}`}
+                        >
+                          {isSelected ? <CheckSquare size={14} /> : <Square size={14} />}
+                        </button>
+                        <div className="flex-1 min-w-0" onClick={() => onToggleSource(s.source)}>
                           <div className="text-xs text-gray-200 truncate font-medium" title={s.source}>{name}</div>
                           <div className="text-[10px] text-gray-500 mt-0.5">{s.source_type} · {s.chunk_count} chunks</div>
                         </div>
                         <button
-                          onClick={() => handleDelete(s.source)}
+                          onClick={(e) => { e.stopPropagation(); handleDelete(s.source) }}
                           className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-gray-500 hover:text-red-400 hover:bg-red-950/30 transition-all flex-shrink-0">
                           <X size={11} />
                         </button>

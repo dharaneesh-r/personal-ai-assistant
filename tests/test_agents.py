@@ -144,3 +144,24 @@ class TestAgentEndpoints:
     def test_delete_nonexistent_session_returns_404(self):
         res = client.delete("/agent/session/does-not-exist")
         assert res.status_code == 404
+
+    @patch("app.agents.tools.web_search")
+    @patch("app.agents.tools.load_url")
+    @patch("app.agents.tools.process_document")
+    @patch("app.agents.tools.add_chunks")
+    def test_deep_research_product_success(self, mock_add_chunks, mock_process_doc, mock_load_url, mock_web_search):
+        mock_web_search.return_value = {
+            "results": [
+                {"title": "Zebronics Keyboard", "url": "https://zebronics.com/keyboard", "snippet": "zebronics is best"}
+            ]
+        }
+        mock_load_url.return_value = "This is a Zebronics keyboard model description. It is a very good mechanical keyboard with custom switches, keycaps, and beautiful RGB lighting that works perfectly."
+        mock_process_doc.return_value = [{"text": "This is a Zebronics keyboard model description. It is a very good mechanical keyboard with custom switches, keycaps, and beautiful RGB lighting that works perfectly.", "source": "https://zebronics.com/keyboard", "chunk_index": 0, "source_type": "url", "total_chunks": 1}]
+        mock_add_chunks.return_value = 1
+        
+        from app.agents.tools import deep_research_product
+        result = deep_research_product("best zebronics keyboard", max_pages=1)
+        
+        assert "Successfully crawled and indexed 1 pages" in result["result"]
+        assert result["chunks_indexed"] == 1
+        assert "https://zebronics.com/keyboard" in result["crawled_urls"]

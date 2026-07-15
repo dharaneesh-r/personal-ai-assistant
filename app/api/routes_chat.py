@@ -1,11 +1,12 @@
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from groq import Groq
 
 from app.config import settings
 from app.api.models import ChatRequest, ChatResponse, StatusResponse
+from app.limiter import limiter
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -33,42 +34,44 @@ _SYSTEM_PROMPT = (
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+@limiter.limit(f"{settings.rate_limit_default}/minute")
+async def chat(request: Request, chat_request: ChatRequest):
     client = _get_client()
     try:
         messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-        if request.history:
-            for turn in request.history:
+        if chat_request.history:
+            for turn in chat_request.history:
                 messages.append({"role": turn.role, "content": turn.content})
-        messages.append({"role": "user", "content": request.prompt})
+        messages.append({"role": "user", "content": chat_request.prompt})
 
         completion = client.chat.completions.create(
             messages=messages,
-            model=request.model,
+            model=chat_request.model,
         )
         return ChatResponse(
             response=completion.choices[0].message.content,
-            model=request.model,
+            model=chat_request.model,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest):
+@limiter.limit(f"{settings.rate_limit_default}/minute")
+async def chat_stream(request: Request, chat_request: ChatRequest):
     client = _get_client()
 
     def generate():
         try:
             messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
-            if request.history:
-                for turn in request.history:
+            if chat_request.history:
+                for turn in chat_request.history:
                     messages.append({"role": turn.role, "content": turn.content})
-            messages.append({"role": "user", "content": request.prompt})
+            messages.append({"role": "user", "content": chat_request.prompt})
 
             stream = client.chat.completions.create(
                 messages=messages,
-                model=request.model,
+                model=chat_request.model,
                 stream=True,
             )
             for chunk in stream:
@@ -83,7 +86,8 @@ async def chat_stream(request: ChatRequest):
 
 
 @router.get("/status", response_model=StatusResponse)
-async def status():
+@limiter.limit(f"{settings.rate_limit_default}/minute")
+async def status(request: Request):
     return StatusResponse(
         groq_api_key=bool(settings.groq_api_key),
         default_model=settings.default_model,

@@ -38,6 +38,7 @@ export interface RagOptions {
   useRerank: boolean
   rewriteQuery: boolean
   useGraph: boolean
+  sourceFilter?: string[]
 }
 
 export interface EvalResult {

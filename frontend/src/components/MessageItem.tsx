@@ -18,6 +18,57 @@ mermaid.initialize({
   }
 })
 
+function sanitizeMermaidCode(raw: string): string {
+  let cleaned = raw.trim();
+  
+  // Remove markdown fences
+  cleaned = cleaned.replace(/^```mermaid\s*/i, '');
+  cleaned = cleaned.replace(/^```\s*/i, '');
+  cleaned = cleaned.replace(/```$/, '');
+  
+  // Replace # comments with %% comments
+  cleaned = cleaned.split('\n').map(line => {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('#') && !trimmed.startsWith('#rgba') && !trimmed.startsWith('#hex')) {
+      return '%%' + line.slice(1);
+    }
+    return line;
+  }).join('\n');
+
+  // Wrap all unquoted node labels (brackets, parentheses, braces) in double quotes to prevent syntax errors
+  cleaned = cleaned.replace(/(\w+)\s*\[([^"\]\n]+)\]/g, (match, id, text) => {
+    return `${id}["${text.trim().replace(/"/g, "'")}"]`;
+  });
+  cleaned = cleaned.replace(/(\w+)\s*\(([^")\n]+)\)/g, (match, id, text) => {
+    return `${id}("${text.trim().replace(/"/g, "'")}")`;
+  });
+  cleaned = cleaned.replace(/(\w+)\s*\{([^"}\n]+)\}/g, (match, id, text) => {
+    return `${id}{"${text.trim().replace(/"/g, "'")}"}`;
+  });
+
+  // Fix arrow symbols: replace '->' with '-->'
+  cleaned = cleaned.split('\n').map(line => {
+    if (line.includes('->') && !line.includes('-->') && !line.includes('-.->') && !line.includes('<->')) {
+      return line.replace(/->/g, '-->');
+    }
+    return line;
+  }).join('\n');
+
+  // Ensure diagram starts with valid Mermaid type declaration
+  const lower = cleaned.toLowerCase();
+  const validStarts = [
+    'graph', 'flowchart', 'sequencediagram', 'classdiagram', 
+    'statediagram', 'erdiagram', 'gantt', 'pie', 'gitgraph', 
+    'mindmap', 'timeline', 'c4diagram'
+  ];
+  const hasValidStart = validStarts.some(start => lower.startsWith(start));
+  if (!hasValidStart) {
+    cleaned = 'graph TD\n' + cleaned;
+  }
+  
+  return cleaned.trim();
+}
+
 function MermaidRenderer({ code }: { code: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [svg, setSvg] = useState<string>('')
@@ -33,7 +84,8 @@ function MermaidRenderer({ code }: { code: string }) {
           containerRef.current.innerHTML = ''
         }
         // Render SVG dynamically
-        const { svg: renderedSvg } = await mermaid.render(id, code)
+        const sanitized = sanitizeMermaidCode(code)
+        const { svg: renderedSvg } = await mermaid.render(id, sanitized)
         if (active) {
           setSvg(renderedSvg)
           setError(null)
@@ -74,6 +126,51 @@ function MermaidRenderer({ code }: { code: string }) {
   )
 }
 
+
+function AgentResearchLoader() {
+  const steps = [
+    { text: 'Initializing autonomous research agent...', icon: '🤖' },
+    { text: 'Searching internet for product reviews & specifications...', icon: '🌐' },
+    { text: 'Crawling branded product catalogs & e-commerce pages...', icon: '📄' },
+    { text: 'Extracting key specs, prices, and features...', icon: '✂️' },
+    { text: 'Ingesting data chunks into ChromaDB vector index...', icon: '📥' },
+    { text: 'Retrieving context & ranking candidates using cross-encoder...', icon: '🧠' },
+    { text: 'Formulating final recommendation report...', icon: '✨' },
+  ]
+  const [currentStep, setCurrentStep] = useState(0)
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentStep(s => (s < steps.length - 1 ? s + 1 : s))
+    }, 4500)
+    return () => clearInterval(timer)
+  }, [])
+
+  return (
+    <div className="flex flex-col gap-3 py-1 text-xs">
+      <div className="flex items-center gap-2">
+        <svg className="animate-spin w-4 h-4 text-orange-400" viewBox="0 0 24 24" fill="none">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/>
+        </svg>
+        <span className="text-gray-300 font-medium animate-pulse">Agent is thinking...</span>
+      </div>
+      <div className="flex flex-col gap-2 pl-4 border-l border-gray-700 ml-2">
+        {steps.map((s, idx) => {
+          if (idx > currentStep) return null
+          const isCurrent = idx === currentStep
+          return (
+            <div key={idx} className={`flex items-center gap-2 transition-all duration-500 ${isCurrent ? 'text-orange-400 font-semibold translate-x-1' : 'text-gray-500'}`}>
+              <span>{s.icon}</span>
+              <span>{s.text}</span>
+              {isCurrent && <span className="w-1.5 h-1.5 bg-orange-400 rounded-full animate-ping ml-1" />}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 interface Props { msg: Message }
 
@@ -129,11 +226,15 @@ export default function MessageItem({ msg }: Props) {
         {/* Main bubble */}
         <div className={`bg-gray-800 border ${borderColor} rounded-2xl rounded-tl-sm px-4 py-3`}>
           {msg.streaming && !msg.content ? (
-            <div className="flex gap-1 py-1">
-              <span className="w-2 h-2 bg-gray-400 rounded-full dot-1" />
-              <span className="w-2 h-2 bg-gray-400 rounded-full dot-2" />
-              <span className="w-2 h-2 bg-gray-400 rounded-full dot-3" />
-            </div>
+            msg.mode === 'agent' ? (
+              <AgentResearchLoader />
+            ) : (
+              <div className="flex gap-1 py-1">
+                <span className="w-2 h-2 bg-gray-400 rounded-full dot-1" />
+                <span className="w-2 h-2 bg-gray-400 rounded-full dot-2" />
+                <span className="w-2 h-2 bg-gray-400 rounded-full dot-3" />
+              </div>
+            )
           ) : (
             <div className="prose-ai text-sm text-gray-100">
               <ReactMarkdown
