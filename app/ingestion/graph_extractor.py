@@ -1,6 +1,7 @@
 import json
 from typing import Any, Dict, List, Optional
-from groq import Groq
+from groq import Groq, RateLimitError
+from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 
 from app.config import settings
 
@@ -33,6 +34,16 @@ Example JSON output format:
 }"""
 
 
+@retry(
+    retry=retry_if_exception_type(RateLimitError),
+    stop=stop_after_attempt(5),
+    wait=wait_random_exponential(min=2, max=15),
+    reraise=True
+)
+def _completions_create_with_retry(client: Groq, **kwargs):
+    return client.chat.completions.create(**kwargs)
+
+
 def extract_graph_from_text(
     text: str,
     model: Optional[str] = None
@@ -48,7 +59,8 @@ def extract_graph_from_text(
     truncated_text = text[:8000]
 
     try:
-        response = client.chat.completions.create(
+        response = _completions_create_with_retry(
+            client,
             model=resolved_model,
             messages=[
                 {"role": "system", "content": _EXTRACTION_SYSTEM_PROMPT},

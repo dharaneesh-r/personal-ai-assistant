@@ -3,6 +3,13 @@ import { Upload, Link2, FileText, Trash2, Database, RefreshCw, CheckCircle, Load
 import type { Source, Mode, ChatSession } from '../types'
 import { ingestFile, ingestUrl, ingestText, deleteSource } from '../api/client'
 
+interface UploadingFile {
+  name: string
+  status: 'uploading' | 'contextualizing' | 'success' | 'err'
+  chunks?: number
+  error?: string
+}
+
 interface Props {
   sources: Source[]
   mode: Mode
@@ -16,6 +23,8 @@ interface Props {
   onDeleteChat: (id: string) => void
   selectedSources: string[]
   onToggleSource: (source: string) => void
+  sourcesLoading?: boolean
+  chatsLoading?: boolean
 }
 
 type Tab = 'file' | 'url' | 'text'
@@ -43,6 +52,8 @@ export default function Sidebar({
   onDeleteChat,
   selectedSources,
   onToggleSource,
+  sourcesLoading = false,
+  chatsLoading = false,
 }: Props) {
   const [sidebarTab, setSidebarTab] = useState<'chats' | 'docs'>('chats')
   const [tab, setTab] = useState<Tab>('file')
@@ -55,17 +66,63 @@ export default function Sidebar({
   const [textLoading, setTextLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [lastIngested, setLastIngested] = useState<string | null>(null)
+  const [useContextual, setUseContextual] = useState(false)
+  const [uploadQueue, setUploadQueue] = useState<UploadingFile[]>([])
   const fileRef = useRef<HTMLInputElement>(null)
 
-  async function handleFile(file: File) {
+  async function handleFiles(files: FileList | File[]) {
     setFileLoading(true)
     setLastIngested(null)
+    const fileArray = Array.from(files)
+
+    // Add files to local status queue
+    setUploadQueue(prev => [
+      ...fileArray.map(f => ({ 
+        name: f.name, 
+        status: (useContextual ? 'contextualizing' : 'uploading') as any
+      })),
+      ...prev
+    ])
+    
     try {
-      const d = await ingestFile(file)
-      onToast(`✓ ${d.chunks_stored} chunks stored from ${file.name}`, 'ok')
-      setLastIngested(`${file.name} — ${d.chunks_stored} chunks`)
-      onSourcesChange()
-    } catch (e: any) { onToast(e.message, 'err') }
+      const results = await Promise.all(
+        fileArray.map(async (file) => {
+          try {
+            const d = await ingestFile(file, useContextual)
+            setUploadQueue(prev => prev.map(item => 
+              item.name === file.name 
+                ? { ...item, status: 'success', chunks: d.chunks_stored } 
+                : item
+            ))
+            return { name: file.name, status: 'ok', chunks: d.chunks_stored }
+          } catch (err: any) {
+            setUploadQueue(prev => prev.map(item => 
+              item.name === file.name 
+                ? { ...item, status: 'err', error: err.message } 
+                : item
+            ))
+            return { name: file.name, status: 'err', error: err.message }
+          }
+        })
+      )
+      
+      const successCount = results.filter(r => r.status === 'ok').length
+      const totalChunks = results.reduce((acc, r) => acc + (r.chunks || 0), 0)
+      
+      if (successCount > 0) {
+        onToast(`✓ Ingested ${successCount}/${fileArray.length} files. Stored ${totalChunks} chunks.`, 'ok')
+        setLastIngested(`Ingested ${successCount} files — ${totalChunks} chunks`)
+        onSourcesChange()
+      }
+      
+      results.forEach(r => {
+        if (r.status === 'err') {
+          onToast(`Failed to ingest ${r.name}: ${r.error}`, 'err')
+        }
+      })
+    } catch (e: any) {
+      onToast(e.message, 'err')
+    }
     setFileLoading(false)
     if (fileRef.current) fileRef.current.value = ''
   }
@@ -74,7 +131,7 @@ export default function Sidebar({
     if (!urlVal.trim()) return
     setUrlLoading(true)
     try {
-      const d = await ingestUrl(urlVal.trim())
+      const d = await ingestUrl(urlVal.trim(), useContextual)
       onToast(`✓ ${d.chunks_stored} chunks from URL`, 'ok')
       setLastIngested(`${urlVal} — ${d.chunks_stored} chunks`)
       setUrlVal('')
@@ -88,7 +145,7 @@ export default function Sidebar({
     setTextLoading(true)
     try {
       const name = textName.trim() || 'manual_input'
-      const d = await ingestText(textVal.trim(), name)
+      const d = await ingestText(textVal.trim(), name, useContextual)
       onToast(`✓ ${d.chunks_stored} chunks stored`, 'ok')
       setLastIngested(`${name} — ${d.chunks_stored} chunks`)
       setTextVal(''); setTextName('')
@@ -122,8 +179,8 @@ export default function Sidebar({
       <div className="px-4 py-3 border-b border-gray-700 flex-shrink-0">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 bg-violet-600 rounded-lg flex items-center justify-center text-xs font-bold text-white">G</div>
-            <span className="font-semibold text-sm text-gray-100">Groq AI</span>
+            <div className="w-7 h-7 bg-violet-600 rounded-lg flex items-center justify-center text-xs font-bold text-white">P</div>
+            <span className="font-semibold text-sm text-gray-100">Personal Assistant</span>
           </div>
           <div className="flex items-center gap-1.5">
             <div className={`w-1.5 h-1.5 rounded-full ${mc.dot}`} />
@@ -173,7 +230,18 @@ export default function Sidebar({
               Recent Chats
             </div>
             
-            {chats.length === 0 ? (
+            {chatsLoading ? (
+              <div className="flex flex-col gap-1.5 animate-pulse">
+                {[1, 2, 3, 4].map(n => (
+                  <div key={n} className="flex items-center justify-between px-3 py-2.5 rounded-xl border border-gray-800 bg-gray-850/40">
+                    <div className="flex items-center gap-2 w-full">
+                      <div className="w-3.5 h-3.5 bg-gray-700 rounded-full flex-shrink-0" />
+                      <div className="h-3 bg-gray-700 rounded-md w-3/4" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : chats.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-8 text-center px-4 flex-1 justify-center">
                 <MessageSquare size={20} className="text-gray-700" />
                 <p className="text-xs text-gray-500">No chat history yet</p>
@@ -233,6 +301,21 @@ export default function Sidebar({
               ))}
             </div>
 
+            {/* Contextual Retrieval Toggle */}
+            <div className="flex items-center justify-between mb-2.5 px-1 py-1 bg-gray-800/40 border border-gray-700/30 rounded-lg">
+              <span className="text-[10px] text-gray-400 font-medium flex items-center gap-1" title="Contextual Retrieval prepends document summaries/context to each chunk to improve RAG accuracy">
+                🧠 Contextual Retrieval
+              </span>
+              <button
+                onClick={() => setUseContextual(!useContextual)}
+                className={`w-7 h-4 rounded-full p-0.5 transition-all cursor-pointer ${
+                  useContextual ? 'bg-violet-600 flex justify-end' : 'bg-gray-700 flex justify-start'
+                }`}
+              >
+                <div className="w-3 h-3 bg-white rounded-full shadow-sm" />
+              </button>
+            </div>
+
             {/* File tab */}
             {tab === 'file' && (
               <div>
@@ -240,14 +323,14 @@ export default function Sidebar({
                   onClick={() => !fileLoading && fileRef.current?.click()}
                   onDragOver={e => { e.preventDefault(); setDragging(true) }}
                   onDragLeave={() => setDragging(false)}
-                  onDrop={e => { e.preventDefault(); setDragging(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f) }}
+                  onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files) }}
                   className={`border-2 border-dashed rounded-xl p-4 text-center transition-all cursor-pointer
                     ${fileLoading ? 'border-violet-600 bg-violet-950/30 cursor-not-allowed' :
                       dragging ? 'border-violet-500 bg-violet-950/40 scale-[1.01]' :
                       'border-gray-700 hover:border-violet-600 hover:bg-violet-950/20'}`}
                 >
-                  <input ref={fileRef} type="file" accept=".pdf,.txt,.docx" className="hidden"
-                    onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f) }} />
+                  <input ref={fileRef} type="file" accept=".pdf,.txt,.docx" className="hidden" multiple
+                    onChange={e => { if (e.target.files && e.target.files.length > 0) handleFiles(e.target.files) }} />
                   {fileLoading ? (
                     <div className="flex flex-col items-center gap-2">
                       <Loader2 size={20} className="text-violet-400 animate-spin" />
@@ -265,6 +348,42 @@ export default function Sidebar({
                   <div className="mt-2 flex items-center gap-1.5 px-2 py-1.5 bg-green-950/40 border border-green-800/40 rounded-lg">
                     <CheckCircle size={11} className="text-green-500 flex-shrink-0" />
                     <span className="text-[10px] text-green-400 truncate">{lastIngested}</span>
+                  </div>
+                )}
+                {uploadQueue.length > 0 && tab === 'file' && (
+                  <div className="mt-3 flex flex-col gap-1.5 max-h-48 overflow-y-auto bg-gray-950/20 border border-gray-800 rounded-xl p-2">
+                    <div className="text-[9px] font-semibold text-gray-500 uppercase tracking-widest mb-1">
+                      Upload Progress
+                    </div>
+                    {uploadQueue.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between text-[11px] bg-gray-850/60 p-1.5 rounded-lg border border-gray-800/40">
+                        <span className="truncate max-w-[120px] text-gray-300 font-medium" title={item.name}>
+                          {item.name}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {item.status === 'uploading' && (
+                            <span className="text-[10px] text-violet-400 flex items-center gap-1">
+                              <Loader2 size={10} className="animate-spin" /> Ingesting...
+                            </span>
+                          )}
+                          {item.status === 'contextualizing' && (
+                            <span className="text-[10px] text-amber-400 flex items-center gap-1">
+                              <Loader2 size={10} className="animate-spin" /> Contextualizing...
+                            </span>
+                          )}
+                          {item.status === 'success' && (
+                            <span className="text-[10px] text-green-400 font-medium flex items-center gap-0.5">
+                              ✓ {item.chunks} chunks
+                            </span>
+                          )}
+                          {item.status === 'err' && (
+                            <span className="text-[10px] text-red-400 font-medium cursor-help" title={item.error}>
+                              ✗ Error
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -339,7 +458,16 @@ export default function Sidebar({
 
           {/* Sources list */}
           <div className="flex-1 overflow-y-auto px-3 pb-3">
-            {sources.length === 0 ? (
+            {sourcesLoading ? (
+              <div className="flex flex-col gap-1.5 animate-pulse">
+                {[1, 2, 3].map(n => (
+                  <div key={n} className="rounded-xl border border-gray-800 bg-gray-850/40 p-2.5">
+                    <div className="h-3 bg-gray-700 rounded-md w-2/3 mb-1.5" />
+                    <div className="h-2.5 bg-gray-700 rounded-md w-1/3" />
+                  </div>
+                ))}
+              </div>
+            ) : sources.length === 0 ? (
               <div className="flex flex-col items-center gap-2 py-6 text-center">
                 <Database size={24} className="text-gray-700" />
                 <p className="text-xs text-gray-500">No documents indexed yet</p>

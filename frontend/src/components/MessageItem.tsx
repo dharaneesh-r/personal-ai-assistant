@@ -20,6 +20,9 @@ mermaid.initialize({
 
 function sanitizeMermaidCode(raw: string): string {
   let cleaned = raw.trim();
+
+  // Split inline collapsed connections onto newlines (e.g. A --> B C --> D)
+  cleaned = cleaned.replace(/\s+(\w+)\s*(-->|-.->|==>|->|->>)/g, '\n$1 $2');
   
   // Remove markdown fences
   cleaned = cleaned.replace(/^```mermaid\s*/i, '');
@@ -35,21 +38,39 @@ function sanitizeMermaidCode(raw: string): string {
     return line;
   }).join('\n');
 
+  // Temporarily extract all double-quoted strings to prevent regex corruption inside labels
+  const quotes: string[] = [];
+  cleaned = cleaned.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match) => {
+    quotes.push(match);
+    return `__QUOTE_${quotes.length - 1}__`;
+  });
+
   // Wrap all unquoted node labels (brackets, parentheses, braces) in double quotes to prevent syntax errors
   cleaned = cleaned.replace(/(\w+)\s*\[([^"\]\n]+)\]/g, (match, id, text) => {
+    if (text.includes('__QUOTE_')) return match;
     return `${id}["${text.trim().replace(/"/g, "'")}"]`;
   });
   cleaned = cleaned.replace(/(\w+)\s*\(([^")\n]+)\)/g, (match, id, text) => {
+    if (text.includes('__QUOTE_')) return match;
     return `${id}("${text.trim().replace(/"/g, "'")}")`;
   });
   cleaned = cleaned.replace(/(\w+)\s*\{([^"}\n]+)\}/g, (match, id, text) => {
+    if (text.includes('__QUOTE_')) return match;
     return `${id}{"${text.trim().replace(/"/g, "'")}"}`;
   });
 
-  // Fix arrow symbols: replace '->' with '-->'
+  // Restore the double-quoted strings
+  cleaned = cleaned.replace(/__QUOTE_(\d+)__/g, (match, id) => {
+    return quotes[parseInt(id, 10)];
+  });
+
+  // Fix arrow symbols: replace '->>' and '->' with '-->' safely
   cleaned = cleaned.split('\n').map(line => {
-    if (line.includes('->') && !line.includes('-->') && !line.includes('-.->') && !line.includes('<->')) {
-      return line.replace(/->/g, '-->');
+    // If it's a flowchart or graph diagram, clean up arrows
+    const trimmed = line.trim().toLowerCase();
+    if (!trimmed.startsWith('sequencediagram')) {
+      line = line.replace(/->>/g, '-->');
+      line = line.replace(/(?<!-)->(?!>)/g, '-->');
     }
     return line;
   }).join('\n');
@@ -67,6 +88,50 @@ function sanitizeMermaidCode(raw: string): string {
   }
   
   return cleaned.trim();
+}
+
+function wrapRawMermaidCharts(text: string): string {
+  if (!text) return '';
+  const validStarts = ['graph', 'flowchart', 'sequencediagram', 'classdiagram', 'statediagram', 'erdiagram', 'gantt', 'pie', 'gitgraph', 'mindmap', 'timeline', 'c4diagram'];
+  const lines = text.split('\n');
+  let inMermaidBlock = false;
+  let mermaidLines: string[] = [];
+  const processedLines: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    const lower = trimmed.toLowerCase();
+
+    if (trimmed.startsWith('```')) {
+      processedLines.push(line);
+      continue;
+    }
+
+    const startsWithKeyword = validStarts.some(start => lower.startsWith(start));
+    
+    if (!inMermaidBlock && startsWithKeyword && (lower.includes('tb') || lower.includes('td') || lower.includes('lr') || lower.includes('rl') || lower.includes('-->') || lower.includes('->') || lower.includes('==>'))) {
+      inMermaidBlock = true;
+      mermaidLines.push(line);
+    } else if (inMermaidBlock) {
+      if (trimmed === '' || trimmed.includes('-->') || trimmed.includes('->') || trimmed.includes('==>') || trimmed.includes('-[') || trimmed.includes('|[') || (trimmed.includes('[') && trimmed.includes(']')) || (trimmed.includes('(') && trimmed.includes(')'))) {
+        mermaidLines.push(line);
+      } else {
+        processedLines.push('```mermaid\n' + mermaidLines.join('\n') + '\n```');
+        mermaidLines = [];
+        inMermaidBlock = false;
+        processedLines.push(line);
+      }
+    } else {
+      processedLines.push(line);
+    }
+  }
+
+  if (inMermaidBlock && mermaidLines.length > 0) {
+    processedLines.push('```mermaid\n' + mermaidLines.join('\n') + '\n```');
+  }
+
+  return processedLines.join('\n');
 }
 
 function MermaidRenderer({ code }: { code: string }) {
@@ -251,7 +316,7 @@ export default function MessageItem({ msg }: Props) {
                   }
                 }}
               >
-                {msg.content}
+                {wrapRawMermaidCharts(msg.content)}
               </ReactMarkdown>
               {msg.streaming && <span className="cursor-blink" />}
             </div>

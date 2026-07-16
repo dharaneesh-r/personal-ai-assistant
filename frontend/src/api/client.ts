@@ -79,29 +79,30 @@ export async function deleteSource(source: string) {
   return res.json()
 }
 
-export async function ingestFile(file: File) {
+export async function ingestFile(file: File, useContextual = false) {
   const fd = new FormData()
   fd.append('file', file)
+  fd.append('use_contextual', useContextual.toString())
   const res = await fetch(`${BASE}/ingest/file`, { method: 'POST', body: fd })
   if (!res.ok) throw new Error((await res.json()).detail)
   return res.json()
 }
 
-export async function ingestUrl(url: string) {
+export async function ingestUrl(url: string, useContextual = false) {
   const res = await fetch(`${BASE}/ingest/url`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, use_contextual: useContextual }),
   })
   if (!res.ok) throw new Error((await res.json()).detail)
   return res.json()
 }
 
-export async function ingestText(text: string, sourceName: string) {
+export async function ingestText(text: string, sourceName: string, useContextual = false) {
   const res = await fetch(`${BASE}/ingest/text`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, source_name: sourceName }),
+    body: JSON.stringify({ text, source_name: sourceName, use_contextual: useContextual }),
   })
   if (!res.ok) throw new Error((await res.json()).detail)
   return res.json()

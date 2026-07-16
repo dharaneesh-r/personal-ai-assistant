@@ -31,6 +31,11 @@ export default function App() {
   const [showOptions, setShowOptions] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
 
+  // Loading indicator states for premium skeletons
+  const [sourcesLoading, setSourcesLoading] = useState(false)
+  const [chatsLoading, setChatsLoading] = useState(false)
+  const [messagesLoading, setMessagesLoading] = useState(false)
+
   // Chat history sessions (Claude-like)
   const [chats, setChats] = useState<ChatSession[]>([])
   const [activeChatId, setActiveChatId] = useState<string | null>(null)
@@ -61,6 +66,7 @@ export default function App() {
   }, [])
 
   async function loadSessionsFromBackend() {
+    setChatsLoading(true)
     try {
       const data = await fetchChats()
       const mappedChats: ChatSession[] = data.map((c: any) => ({
@@ -79,6 +85,8 @@ export default function App() {
       }
     } catch (e: any) {
       toast('Failed to load chats: ' + e.message, 'err')
+    } finally {
+      setChatsLoading(false)
     }
   }
 
@@ -94,12 +102,15 @@ export default function App() {
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
   async function loadSources() {
+    setSourcesLoading(true)
     try {
       const data = await getSources()
       setSources(data)
       const sourceNames = data.map((s: any) => s.source)
       setSelectedSources(prev => prev.filter(s => sourceNames.includes(s)))
-    } catch {}
+    } catch {} finally {
+      setSourcesLoading(false)
+    }
   }
 
   function toast(msg: string, type: 'ok' | 'err' | 'info' = 'ok') {
@@ -312,6 +323,7 @@ export default function App() {
   }
 
   async function handleSelectChat(id: string) {
+    setMessagesLoading(true)
     try {
       const detail = await fetchChatDetail(id)
       const fullMessages: Message[] = detail.messages.map((m: any) => ({
@@ -334,6 +346,8 @@ export default function App() {
       setModel(detail.session.model)
     } catch (e: any) {
       toast('Failed to load chat details: ' + e.message, 'err')
+    } finally {
+      setMessagesLoading(false)
     }
   }
 
@@ -394,6 +408,8 @@ export default function App() {
         onDeleteChat={handleDeleteChat}
         selectedSources={selectedSources}
         onToggleSource={handleToggleSource}
+        sourcesLoading={sourcesLoading}
+        chatsLoading={chatsLoading}
       />
 
       {/* Main */}
@@ -491,7 +507,22 @@ export default function App() {
           <>
             {/* Messages */}
             <div className="flex-1 overflow-y-auto">
-              {messages.length === 0 ? (
+              {messagesLoading ? (
+                <div className="max-w-3xl mx-auto px-4 py-6 flex flex-col gap-5 animate-pulse">
+                  {[1, 2, 3].map(n => (
+                    <div key={n} className={`flex gap-3 ${n % 2 === 0 ? 'flex-row-reverse' : ''}`}>
+                      <div className="w-7 h-7 rounded-full bg-gray-700 flex-shrink-0" />
+                      <div className={`flex-1 space-y-3 py-1 ${n % 2 === 0 ? 'text-right flex flex-col items-end' : ''}`}>
+                        <div className="h-4 bg-gray-700 rounded w-1/4" />
+                        <div className="space-y-2 w-full flex flex-col">
+                          <div className={`h-3 bg-gray-700 rounded w-5/6 ${n % 2 === 0 ? 'self-end' : ''}`} />
+                          <div className={`h-3 bg-gray-700 rounded w-2/3 ${n % 2 === 0 ? 'self-end' : ''}`} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : messages.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center gap-4 p-6">
                   <div className="text-5xl">{emptyMsgs[mode].icon}</div>
                   <div className="text-center">
@@ -502,7 +533,7 @@ export default function App() {
                     <div className="flex flex-wrap gap-2 justify-center max-w-lg">
                       {emptyMsgs[mode].pills.map(p => (
                         <button key={p} onClick={() => { setInput(p); inputRef.current?.focus() }}
-                          className="text-sm px-3.5 py-1.5 rounded-xl border border-gray-600 text-gray-300 hover:border-gray-500 hover:bg-gray-750 transition-colors">
+                           className="text-sm px-3.5 py-1.5 rounded-xl border border-gray-600 text-gray-300 hover:border-gray-500 hover:bg-gray-750 transition-colors">
                           {p}
                         </button>
                       ))}

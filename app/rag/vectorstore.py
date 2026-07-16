@@ -40,6 +40,7 @@ def add_chunks(chunks: List[Dict[str, Any]]) -> int:
                 "source_type": c["source_type"],
                 "chunk_index": c["chunk_index"],
                 "total_chunks": c["total_chunks"],
+                "original_text": c.get("original_text", c["text"]),
             }
             for c in chunks
         ],
@@ -86,6 +87,7 @@ def search(query: str, top_k: int = 5, where: Optional[Dict[str, Any]] = None) -
     return [
         {
             "text": results["documents"][0][i],
+            "original_text": results["metadatas"][0][i].get("original_text", results["documents"][0][i]),
             "source": results["metadatas"][0][i]["source"],
             "source_type": results["metadatas"][0][i]["source_type"],
             "chunk_index": results["metadatas"][0][i]["chunk_index"],

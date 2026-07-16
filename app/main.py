@@ -17,9 +17,11 @@ from app.config import settings
 from app.logger import LoggingMiddleware, logger
 from app.limiter import limiter
 from app.database import init_db
+from app.tracing import init_tracer
 
 os.makedirs("logs", exist_ok=True)
 init_db()
+init_tracer()
 
 app = FastAPI(title="Groq AI Workspace")
 app.state.limiter = limiter

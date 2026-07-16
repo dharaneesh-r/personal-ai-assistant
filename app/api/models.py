@@ -31,10 +31,12 @@ class StatusResponse(BaseModel):
 class IngestTextRequest(BaseModel):
     text: str
     source_name: str = "manual_input"
+    use_contextual: bool = False
 
 
 class IngestUrlRequest(BaseModel):
     url: str
+    use_contextual: bool = False
 
 
 class ChunkPreview(BaseModel):

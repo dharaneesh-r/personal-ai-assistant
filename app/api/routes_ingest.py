@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Request
+from fastapi import APIRouter, HTTPException, UploadFile, File, Request, Form, BackgroundTasks
 
 from app.api.models import ChunkPreview, IngestResponse, IngestTextRequest, IngestUrlRequest
 from app.ingestion.loader import load_file, load_url
@@ -27,18 +27,28 @@ def _extract_and_store_graph(text: str, source: str):
 
 @router.post("/text", response_model=IngestResponse)
 @limiter.limit(f"{settings.rate_limit_default}/minute")
-async def ingest_text(request: Request, ingest_request: IngestTextRequest):
+async def ingest_text(request: Request, ingest_request: IngestTextRequest, background_tasks: BackgroundTasks):
     if not ingest_request.text.strip():
         raise HTTPException(status_code=400, detail="Text cannot be empty.")
-    chunks = process_document(ingest_request.text, source=ingest_request.source_name, source_type="text")
+    chunks = process_document(
+        ingest_request.text,
+        source=ingest_request.source_name,
+        source_type="text",
+        use_contextual=ingest_request.use_contextual,
+    )
     stored = add_chunks(chunks)
-    _extract_and_store_graph(ingest_request.text, ingest_request.source_name)
+    background_tasks.add_task(_extract_and_store_graph, ingest_request.text, ingest_request.source_name)
     return _build_response(ingest_request.source_name, "text", chunks, stored)
 
 
 @router.post("/file", response_model=IngestResponse)
 @limiter.limit(f"{settings.rate_limit_default}/minute")
-async def ingest_file(request: Request, file: UploadFile = File(...)):
+async def ingest_file(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    use_contextual: bool = Form(False)
+):
     suffix = Path(file.filename).suffix.lower()
     if suffix not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
@@ -56,15 +66,20 @@ async def ingest_file(request: Request, file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Failed to read file: {e}")
 
     source_type = suffix.lstrip(".")
-    chunks = process_document(text, source=file.filename, source_type=source_type)
+    chunks = process_document(
+        text,
+        source=file.filename,
+        source_type=source_type,
+        use_contextual=use_contextual,
+    )
     stored = add_chunks(chunks)
-    _extract_and_store_graph(text, file.filename)
+    background_tasks.add_task(_extract_and_store_graph, text, file.filename)
     return _build_response(file.filename, source_type, chunks, stored)
 
 
 @router.post("/url", response_model=IngestResponse)
 @limiter.limit(f"{settings.rate_limit_default}/minute")
-async def ingest_url(request: Request, ingest_request: IngestUrlRequest):
+async def ingest_url(request: Request, ingest_request: IngestUrlRequest, background_tasks: BackgroundTasks):
     try:
         text = load_url(ingest_request.url)
     except ValueError as e:
@@ -75,9 +90,14 @@ async def ingest_url(request: Request, ingest_request: IngestUrlRequest):
     if not text.strip():
         raise HTTPException(status_code=400, detail="No text content found at the given URL.")
 
-    chunks = process_document(text, source=ingest_request.url, source_type="url")
+    chunks = process_document(
+        text,
+        source=ingest_request.url,
+        source_type="url",
+        use_contextual=ingest_request.use_contextual,
+    )
     stored = add_chunks(chunks)
-    _extract_and_store_graph(text, ingest_request.url)
+    background_tasks.add_task(_extract_and_store_graph, text, ingest_request.url)
     return _build_response(ingest_request.url, "url", chunks, stored)
 
 

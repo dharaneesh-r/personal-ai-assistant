@@ -2,7 +2,8 @@ import json
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from groq import Groq
+from groq import Groq, RateLimitError
+from tenacity import retry, stop_after_attempt, wait_random_exponential, retry_if_exception_type
 
 from app.config import settings
 from app.api.models import ChatRequest, ChatResponse, StatusResponse
@@ -17,6 +18,16 @@ def _get_client() -> Groq:
     return Groq(api_key=settings.groq_api_key)
 
 
+@retry(
+    retry=retry_if_exception_type(RateLimitError),
+    stop=stop_after_attempt(5),
+    wait=wait_random_exponential(min=2, max=15),
+    reraise=True
+)
+def _completions_create_with_retry(client: Groq, **kwargs):
+    return client.chat.completions.create(**kwargs)
+
+
 _SYSTEM_PROMPT = (
     "You are a helpful AI assistant. Be extremely forgiving of spelling mistakes, typos, "
     "and grammatical errors. Intelligently deduce the user's intent and answer directly "
@@ -24,7 +35,7 @@ _SYSTEM_PROMPT = (
     "(even with typos like 'piechart ot fhtat' or 'table ot thta'), output the requested "
     "chart (in Mermaid format) or table based on the context of the conversation. "
     "IMPORTANT: When generating Mermaid charts, you MUST obey these syntax rules:\n"
-    "1. Node IDs (variable names) must be strictly single alphanumeric words without spaces, dots, or special characters. Use snake_case (e.g. dharaneesh_r or node_js).\n"
+    "1. Node IDs (variable names) must be strictly single alphanumeric words (letters, numbers, underscores). NO slashes (/), spaces, hyphens, dots, or other special characters. (e.g. use rtgs_neft, NOT RTGS/NEFT).\n"
     "2. Always enclose node labels in double quotes (e.g., dharaneesh_r[\"Dharaneesh R\"] or node_js[\"Node.js\"]).\n"
     "3. Links with text must be formatted as: A -->|text| B (do NOT write A -->|text|> B).\n"
     "Example of correct code:\n"
@@ -44,7 +55,8 @@ async def chat(request: Request, chat_request: ChatRequest):
                 messages.append({"role": turn.role, "content": turn.content})
         messages.append({"role": "user", "content": chat_request.prompt})
 
-        completion = client.chat.completions.create(
+        completion = _completions_create_with_retry(
+            client,
             messages=messages,
             model=chat_request.model,
         )
@@ -69,7 +81,8 @@ async def chat_stream(request: Request, chat_request: ChatRequest):
                     messages.append({"role": turn.role, "content": turn.content})
             messages.append({"role": "user", "content": chat_request.prompt})
 
-            stream = client.chat.completions.create(
+            stream = _completions_create_with_retry(
+                client,
                 messages=messages,
                 model=chat_request.model,
                 stream=True,
