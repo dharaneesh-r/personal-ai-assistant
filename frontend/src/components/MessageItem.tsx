@@ -38,25 +38,33 @@ function sanitizeMermaidCode(raw: string): string {
     return line;
   }).join('\n');
 
+  // Fix common LLM mistakes: unclosed or missing opening quotes in multiline labels
+  cleaned = cleaned.replace(/\[\s*"([^"\]]*)]/g, '["$1"]');
+  cleaned = cleaned.replace(/\[([^"\]]*)"\s*]/g, '["$1"]');
+  cleaned = cleaned.replace(/\(\s*"([^")]*)\)/g, '("$1")');
+  cleaned = cleaned.replace(/\([^")]*"\s*\)/g, '("$1")');
+  cleaned = cleaned.replace(/\{\s*"([^"}]*)}/g, '{"$1"}');
+  cleaned = cleaned.replace(/\{([^"}]*)"\s*}/g, '{"$1"}');
+
   // Temporarily extract all double-quoted strings to prevent regex corruption inside labels
   const quotes: string[] = [];
   cleaned = cleaned.replace(/"([^"\\]*(?:\\.[^"\\]*)*)"/g, (match) => {
-    quotes.push(match);
+    quotes.push(match.replace(/\r?\n/g, ' <br/> '));
     return `__QUOTE_${quotes.length - 1}__`;
   });
 
   // Wrap all unquoted node labels (brackets, parentheses, braces) in double quotes to prevent syntax errors
-  cleaned = cleaned.replace(/(\w+)\s*\[([^"\]\n]+)\]/g, (match, id, text) => {
+  cleaned = cleaned.replace(/(\w+)\s*\[([^"\]]+)\]/g, (match, id, text) => {
     if (text.includes('__QUOTE_')) return match;
-    return `${id}["${text.trim().replace(/"/g, "'")}"]`;
+    return `${id}["${text.trim().replace(/"/g, "'").replace(/\r?\n/g, ' <br/> ')}"]`;
   });
-  cleaned = cleaned.replace(/(\w+)\s*\(([^")\n]+)\)/g, (match, id, text) => {
+  cleaned = cleaned.replace(/(\w+)\s*\(([^")]+)\)/g, (match, id, text) => {
     if (text.includes('__QUOTE_')) return match;
-    return `${id}("${text.trim().replace(/"/g, "'")}")`;
+    return `${id}("${text.trim().replace(/"/g, "'").replace(/\r?\n/g, ' <br/> ')}")`;
   });
-  cleaned = cleaned.replace(/(\w+)\s*\{([^"}\n]+)\}/g, (match, id, text) => {
+  cleaned = cleaned.replace(/(\w+)\s*\{([^"}]+)\}/g, (match, id, text) => {
     if (text.includes('__QUOTE_')) return match;
-    return `${id}{"${text.trim().replace(/"/g, "'")}"}`;
+    return `${id}{"${text.trim().replace(/"/g, "'").replace(/\r?\n/g, ' <br/> ')}"}`;
   });
 
   // Restore the double-quoted strings
@@ -71,8 +79,26 @@ function sanitizeMermaidCode(raw: string): string {
     if (!trimmed.startsWith('sequencediagram')) {
       line = line.replace(/->>/g, '-->');
       line = line.replace(/(?<!-)->(?!>)/g, '-->');
+      line = line.replace(/\|([^|]+)\|\s*(?:>-|->|-->|>)\s*/g, '|$1| ');
+      line = line.replace(/>-/g, '-->');
     }
     return line;
+  }).filter(line => {
+    const trimmed = line.trim();
+    if (trimmed === '') return false;
+    const match = /^([A-Za-z]+)(?:,\s*|\s+)([A-Za-z]+)/.exec(trimmed);
+    if (match) {
+      const firstWord = match[1].toLowerCase();
+      const validKeywords = [
+        'subgraph', 'end', 'classdef', 'class', 'click', 'style', 'linkstyle', 'note', 'direction', 
+        'graph', 'flowchart', 'pie', 'gantt', 'sequencediagram', 'classdiagram', 'statediagram', 
+        'erdiagram', 'gitgraph', 'mindmap', 'timeline', 'c4diagram', 'participant', 'actor', 'state', 'title'
+      ];
+      if (!validKeywords.includes(firstWord)) {
+        return false;
+      }
+    }
+    return true;
   }).join('\n');
 
   // Ensure diagram starts with valid Mermaid type declaration
@@ -95,6 +121,7 @@ function wrapRawMermaidCharts(text: string): string {
   const validStarts = ['graph', 'flowchart', 'sequencediagram', 'classdiagram', 'statediagram', 'erdiagram', 'gantt', 'pie', 'gitgraph', 'mindmap', 'timeline', 'c4diagram'];
   const lines = text.split('\n');
   let inMermaidBlock = false;
+  let inFence = false;
   let mermaidLines: string[] = [];
   const processedLines: string[] = [];
 
@@ -104,6 +131,17 @@ function wrapRawMermaidCharts(text: string): string {
     const lower = trimmed.toLowerCase();
 
     if (trimmed.startsWith('```')) {
+      if (inMermaidBlock) {
+        processedLines.push('```mermaid\n' + mermaidLines.join('\n') + '\n```');
+        mermaidLines = [];
+        inMermaidBlock = false;
+      }
+      inFence = !inFence;
+      processedLines.push(line);
+      continue;
+    }
+
+    if (inFence) {
       processedLines.push(line);
       continue;
     }
@@ -114,13 +152,14 @@ function wrapRawMermaidCharts(text: string): string {
       inMermaidBlock = true;
       mermaidLines.push(line);
     } else if (inMermaidBlock) {
-      if (trimmed === '' || trimmed.includes('-->') || trimmed.includes('->') || trimmed.includes('==>') || trimmed.includes('-[') || trimmed.includes('|[') || (trimmed.includes('[') && trimmed.includes(']')) || (trimmed.includes('(') && trimmed.includes(')'))) {
-        mermaidLines.push(line);
-      } else {
+      // If it looks like a regular sentence (capital letter followed by lowercase, no mermaid-specific characters like [, (, {, >) then end block.
+      if (trimmed !== '' && /^[A-Z][a-z]/.test(trimmed) && !trimmed.includes('-->') && !trimmed.includes('->') && !trimmed.includes('[') && !trimmed.includes('(')) {
         processedLines.push('```mermaid\n' + mermaidLines.join('\n') + '\n```');
         mermaidLines = [];
         inMermaidBlock = false;
         processedLines.push(line);
+      } else {
+        mermaidLines.push(line);
       }
     } else {
       processedLines.push(line);
