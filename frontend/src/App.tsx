@@ -389,7 +389,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-800 text-gray-100 overflow-hidden">
+    <div className="flex h-screen bg-transparent text-gray-100 overflow-hidden">
       <Sidebar
         sources={sources}
         mode={mode}
@@ -416,7 +416,7 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
 
         {/* Top bar */}
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-gray-700 bg-gray-850 flex-shrink-0">
+        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/5 glass-panel flex-shrink-0 z-10">
           {(['chat', 'rag', 'agent', 'eval', 'graph'] as Mode[]).map(t => (
             <button key={t} onClick={() => switchMode(t)} className={tabCls(t)}>
               {modeIcon[t]} {modeLabel[t]}
@@ -551,7 +551,7 @@ export default function App() {
             {/* Input */}
             <div className="px-4 pb-4 pt-2 flex-shrink-0">
               <div className="max-w-3xl mx-auto">
-                <div className="flex gap-2 items-end bg-gray-700 border border-gray-600 rounded-2xl px-3 py-2 focus-within:border-gray-500 transition-colors">
+                <div className="flex gap-2 items-end glass-panel border border-white/10 rounded-2xl px-3 py-2 transition-all hover:border-white/20 focus-within:border-cyan-500/50">
                   <textarea
                     ref={inputRef}
                     value={input}

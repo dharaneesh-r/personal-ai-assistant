@@ -2,23 +2,58 @@ from typing import Any, Dict, List, Optional
 
 from rank_bm25 import BM25Okapi
 
-from app.rag.vectorstore import search, _get_collection
-
+from app.rag.vectorstore import search, _get_client, COLLECTION_NAME
+from qdrant_client import models
 
 def _fetch_all_docs(where: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
-    collection = _get_collection()
-    if collection.count() == 0:
-        return []
-    result = collection.get(include=["documents", "metadatas"], where=where)
-    return [
-        {
-            "text": result["documents"][i],
-            "source": result["metadatas"][i]["source"],
-            "source_type": result["metadatas"][i]["source_type"],
-            "chunk_index": result["metadatas"][i]["chunk_index"],
-        }
-        for i in range(len(result["ids"]))
-    ]
+    client = _get_client()
+    
+    query_filter = None
+    if where:
+        must_conditions = []
+        for key, val in where.items():
+            if isinstance(val, dict) and "$in" in val:
+                must_conditions.append(
+                    models.FieldCondition(
+                        key=key,
+                        match=models.MatchAny(any=val["$in"])
+                    )
+                )
+            else:
+                must_conditions.append(
+                    models.FieldCondition(
+                        key=key,
+                        match=models.MatchValue(value=val)
+                    )
+                )
+        if must_conditions:
+            query_filter = models.Filter(must=must_conditions)
+
+    all_docs = []
+    offset = None
+    while True:
+        records, next_offset = client.scroll(
+            collection_name=COLLECTION_NAME,
+            limit=1000,
+            with_payload=True,
+            with_vectors=False,
+            scroll_filter=query_filter,
+            offset=offset
+        )
+        
+        for r in records:
+            all_docs.append({
+                "text": r.payload.get("text"),
+                "source": r.payload.get("source"),
+                "source_type": r.payload.get("source_type"),
+                "chunk_index": r.payload.get("chunk_index"),
+            })
+            
+        if next_offset is None:
+            break
+        offset = next_offset
+        
+    return all_docs
 
 
 def _rrf(ranks: List[List[int]], k: int = 60) -> List[float]:

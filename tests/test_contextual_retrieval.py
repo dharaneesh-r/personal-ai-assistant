@@ -13,7 +13,7 @@ client = TestClient(app)
 def temp_chroma_db(tmp_path, monkeypatch):
     """Isolate ChromaDB for testing."""
     test_db_dir = tmp_path / "test_chroma_db"
-    monkeypatch.setattr("app.rag.vectorstore.settings.chroma_db_path", str(test_db_dir))
+    monkeypatch.setattr("app.rag.vectorstore.settings.qdrant_path", str(test_db_dir))
     
     from app.rag.vectorstore import _get_client
     _get_client.cache_clear()

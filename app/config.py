@@ -6,7 +6,9 @@ class Settings(BaseSettings):
 
     groq_api_key: str = ""
     default_model: str = "llama-3.1-8b-instant"
-    chroma_db_path: str = "./data/chroma_db"
+    qdrant_path: str = "./data/qdrant_db"
+    qdrant_url: str = ""
+    qdrant_api_key: str = ""
     embed_model: str = "all-MiniLM-L6-v2"
 
     # Security

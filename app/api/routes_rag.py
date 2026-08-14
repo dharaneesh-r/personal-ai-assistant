@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from app.api.models import DeleteResponse, RagQueryRequest, RagQueryResponse, SourceInfo
 from app.rag.pipeline import rag_query
 from app.rag.retriever import retrieve
-from app.rag.vectorstore import delete_source, list_sources, _get_collection
+from app.rag.vectorstore import delete_source, list_sources, get_total_docs
 from app.rag.graphstore import delete_source_graph, clear_graph, get_all_graph
 from app.config import settings
 from app.limiter import limiter
@@ -82,7 +82,7 @@ async def debug_retrieval(request: Request, debug_request: DebugRequest) -> Dict
             use_hybrid=debug_request.use_hybrid,
             use_rerank=debug_request.use_rerank,
         )
-        total_docs = _get_collection().count()
+        total_docs = get_total_docs()
         return {
             "query": debug_request.query,
             "total_chunks_in_db": total_docs,

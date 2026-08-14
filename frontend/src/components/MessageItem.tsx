@@ -233,13 +233,12 @@ function MermaidRenderer({ code }: { code: string }) {
 
 function AgentResearchLoader() {
   const steps = [
-    { text: 'Initializing autonomous research agent...', icon: '🤖' },
-    { text: 'Searching internet for product reviews & specifications...', icon: '🌐' },
-    { text: 'Crawling branded product catalogs & e-commerce pages...', icon: '📄' },
-    { text: 'Extracting key specs, prices, and features...', icon: '✂️' },
-    { text: 'Ingesting data chunks into ChromaDB vector index...', icon: '📥' },
-    { text: 'Retrieving context & ranking candidates using cross-encoder...', icon: '🧠' },
-    { text: 'Formulating final recommendation report...', icon: '✨' },
+    { text: 'Supervisor analyzing request...', icon: '👨‍💼' },
+    { text: 'Delegating task to Researcher Agent...', icon: '🔍' },
+    { text: 'Researcher gathering context from knowledge base...', icon: '📚' },
+    { text: 'Delegating calculations to Coder Agent...', icon: '💻' },
+    { text: 'Executing Python sandbox...', icon: '🐍' },
+    { text: 'Supervisor synthesizing final report...', icon: '✨' },
   ]
   const [currentStep, setCurrentStep] = useState(0)
 
@@ -295,7 +294,7 @@ export default function MessageItem({ msg }: Props) {
   const time = msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 
   const toolIcon: Record<string, string> = {
-    rag_lookup: '🔍', web_search: '🌐', calculator: '🧮', run_python: '🐍',
+    rag_lookup: '🔍', web_search: '🌐', calculator: '🧮', run_python: '🐍', delegate_to_specialist: '👨‍💼', deep_research_product: '🛒'
   }
 
   if (msg.role === 'user') {
@@ -328,7 +327,7 @@ export default function MessageItem({ msg }: Props) {
 
       <div className="flex-1 min-w-0 max-w-3xl">
         {/* Main bubble */}
-        <div className={`bg-gray-800 border ${borderColor} rounded-2xl rounded-tl-sm px-4 py-3`}>
+        <div className={`glass-panel border ${borderColor} rounded-2xl rounded-tl-sm px-4 py-3 slide-up`}>
           {msg.streaming && !msg.content ? (
             msg.mode === 'agent' ? (
               <AgentResearchLoader />
@@ -373,13 +372,13 @@ export default function MessageItem({ msg }: Props) {
         {msg.toolCalls && msg.toolCalls.length > 0 && (
           <div className="mt-2 flex flex-col gap-1.5">
             {msg.toolCalls.map((tc, i) => (
-              <div key={i} className="border border-orange-900/30 rounded-xl overflow-hidden">
+              <div key={i} className="border border-purple-900/30 rounded-xl overflow-hidden glass-panel mb-2 slide-up">
                 <button
                   onClick={() => toggleTool(i)}
-                  className="w-full flex items-center gap-2 px-3 py-2 bg-orange-950/20 hover:bg-orange-950/30 transition-colors text-left"
+                  className="w-full flex items-center gap-2 px-3 py-2 hover:bg-purple-950/20 transition-colors text-left"
                 >
                   <span className="text-sm">{toolIcon[tc.tool] ?? '🔧'}</span>
-                  <span className="text-xs font-semibold text-orange-400">{tc.tool}</span>
+                  <span className="text-xs font-semibold text-purple-400">{tc.tool}</span>
                   <span className="text-xs text-gray-500 flex-1 truncate">{JSON.stringify(tc.args)}</span>
                   <ChevronRight size={12} className={`text-gray-500 transition-transform flex-shrink-0 ${openTools[i] ? 'rotate-90' : ''}`} />
                 </button>
